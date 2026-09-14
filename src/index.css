@@ -1,0 +1,111 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Paleta com significado. Cada cor tem UM sentido em todo o sistema:
+     verde   = está tudo certo / concluído / saldo positivo
+     âmbar   = atenção, precisa de providência em breve
+     vermelho= crítico, já passou do prazo
+   --------------------------------------------------------------------------- */
+@theme {
+  --color-marca-50: #eef4ff;
+  --color-marca-100: #d9e6ff;
+  --color-marca-200: #bcd3ff;
+  --color-marca-500: #2f6feb;
+  --color-marca-600: #1f57c7;
+  --color-marca-700: #1a45a0;
+  --color-marca-900: #12306e;
+
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f4f6fa;
+  color: #16203a;
+  font-family: var(--font-sans);
+}
+
+/* Realce de foco visível — acessibilidade para quem navega por teclado. */
+:focus-visible {
+  outline: 3px solid var(--color-marca-500);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Barra de rolagem discreta nas colunas do quadro de processos. */
+.rolagem-suave::-webkit-scrollbar {
+  width: 8px;
+}
+.rolagem-suave::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   BRILHO DOS CARTÕES DE NÚMERO
+   A sombra e o anel saem daqui, e não de utilitários do Tailwind, por um motivo
+   prático: os dois escreveriam na mesma propriedade (box-shadow) com o mesmo
+   peso, e qual venceria dependeria da ordem em que o CSS foi gerado. Aqui a
+   regra é uma só, e a cor vem da variável que o cartão define conforme o tom.
+   --------------------------------------------------------------------------- */
+.cartao-kpi:hover,
+.cartao-kpi:focus-visible {
+  box-shadow:
+    0 18px 38px -16px var(--brilho, rgba(15, 32, 64, 0.3)),
+    0 0 0 2px var(--anel, transparent);
+  border-color: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   SURGIMENTO DAS SEÇÕES
+   Um deslize curto de baixo para cima ao abrir a tela ou trocar de aba. Curto
+   de propósito: quem usa o painel o dia inteiro abre a mesma tela dezenas de
+   vezes, e meio segundo de espera vira meia hora de espera no fim do mês.
+   --------------------------------------------------------------------------- */
+@keyframes surgir {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.surge {
+  animation: surgir 0.36s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+/* Escalonamento: os blocos entram em sequência, não todos de uma vez. */
+.surge-2 {
+  animation-delay: 0.07s;
+}
+.surge-3 {
+  animation-delay: 0.14s;
+}
+
+/* ---------------------------------------------------------------------------
+   QUEM PEDIU MENOS MOVIMENTO NÃO VÊ MOVIMENTO
+   Vale para tudo: o surgimento das seções, o pulso das etiquetas críticas e as
+   transições dos botões. É uma preferência do sistema operacional, usada por
+   quem sente enjoo ou tem enxaqueca com animação — e o painel é ferramenta de
+   trabalho diário, não vitrine.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .surge {
+    animation: none;
+  }
+}

@@ -1,0 +1,46 @@
+{
+  // ---------------------------------------------------------------------------
+  // Configuração do Wrangler — Cloudflare Workers (com assets estáticos) + D1
+  //
+  // Passo a passo para publicar:
+  //   1. npx wrangler login
+  //   2. npx wrangler d1 create secretaria-db      <- copie o database_id gerado
+  //   3. cole o database_id abaixo
+  //   4. npm run db:remote                          <- cria as tabelas na nuvem
+  //   5. npm run deploy
+  //   6. npx wrangler secret put PAINEL_SEGREDO     <- só DEPOIS do deploy: o
+  //      comando precisa que o Worker já exista. O segredo passa a valer na
+  //      hora, sem publicar de novo.
+  //
+  // ATENÇÃO, depois que o sistema estiver em uso: `npm run db:remote` roda o
+  // 0001_schema.sql, que começa com DROP TABLE — ele RECRIA o banco e apaga
+  // tudo. Para atualizar o sistema, rode apenas `npm run deploy`.
+  // ---------------------------------------------------------------------------
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "secretaria-controle",
+  "main": "worker/index.ts",
+  "compatibility_date": "2024-12-30",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Serve o front-end compilado (pasta dist) e devolve index.html em qualquer
+  // rota que não seja /api/* — necessário para a navegação da SPA.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "secretaria-db",
+      // Substitua pelo id devolvido por `wrangler d1 create secretaria-db`
+      "database_id": "3d4c0635-f581-45fd-91cb-0a0d2bcef691",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

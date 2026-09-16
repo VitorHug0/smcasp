@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Check, FileSpreadsheet, Pencil, Plus, Search } from 'lucide-react';
+import { AlertTriangle, Check, FileSpreadsheet, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
@@ -68,6 +68,7 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
   const [emEdicao, setEmEdicao] = useState<Processo | null>(null);
   const [falhaAoSalvar, setFalhaAoSalvar] = useState<string | null>(null);
   const [concluido, setConcluido] = useState<string | null>(null);
+  const [apagado, setApagado] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [responsavelFiltro, setResponsavelFiltro] = useState('');
   const [prioridadeFiltro, setPrioridadeFiltro] = useState('');
@@ -262,6 +263,25 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
         </div>
       )}
 
+      {/* A linha sumiu do meio de uma planilha longa: sem este aviso, quem
+          apagou não tem como saber se o clique valeu. */}
+      {apagado && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-800">
+          <Trash2 className="size-4 shrink-0" />
+          <span className="flex-1">
+            <strong>{apagado}</strong> foi apagado e saiu do sistema.
+          </span>
+          <button
+            type="button"
+            onClick={() => setApagado(null)}
+            aria-label="Fechar aviso"
+            className="rounded-md px-2 py-1 text-slate-600 hover:bg-slate-200"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
+
       {concluido && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <Check className="size-4 shrink-0" />
@@ -391,6 +411,11 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
               : [salvo, ...processos],
           );
           setModalAberto(false);
+        }}
+        aoExcluir={(removido) => {
+          setLista(processos.filter((p) => p.id !== removido.id));
+          setModalAberto(false);
+          setApagado(removido.objeto);
         }}
       />
     </div>
@@ -605,6 +630,7 @@ export function ModalProcesso({
   usuarios,
   aoFechar,
   aoSalvar,
+  aoExcluir,
 }: {
   aberto: boolean;
   /** Presente = edição completa de um processo existente; ausente = cadastro. */
@@ -613,6 +639,8 @@ export function ModalProcesso({
   usuarios: Usuario[];
   aoFechar: () => void;
   aoSalvar: (p: Processo) => void;
+  /** Ausente = a tela não oferece exclusão, e o botão de apagar não aparece. */
+  aoExcluir?: (p: Processo) => void;
 }) {
   const vazio = {
     sei: '',
@@ -658,6 +686,8 @@ export function ModalProcesso({
   const [erros, setErros] = useState<Record<string, string>>({});
   const [falha, setFalha] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   // Troca de processo em edição (ou volta para cadastro) recarrega o formulário.
   if (chave !== (processo?.id ?? 0)) {
@@ -665,6 +695,7 @@ export function ModalProcesso({
     setForm(inicial);
     setErros({});
     setFalha(null);
+    setConfirmandoExclusao(false);
   }
 
   const mudar = (campo: keyof typeof vazio) => (valor: string) =>
@@ -710,6 +741,32 @@ export function ModalProcesso({
     }
   }
 
+  async function apagar() {
+    if (!processo) return;
+    setExcluindo(true);
+    setFalha(null);
+    try {
+      await api.processos.excluir(processo.id);
+      setConfirmandoExclusao(false);
+      aoExcluir?.(processo);
+    } catch (e) {
+      setConfirmandoExclusao(false);
+      setFalha(e instanceof ErroDaApi ? e.message : 'Não foi possível apagar o processo.');
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
+  // Fechar com a confirmação de exclusão à mostra não pode deixá-la armada:
+  // reabrir a mesma ficha traria o "Sim, apagar" já na tela, sem que ninguém
+  // tivesse pedido para apagar nada.
+  function fechar() {
+    setConfirmandoExclusao(false);
+    aoFechar();
+  }
+
+  const podeApagar = podeEditar && processo !== null && aoExcluir !== undefined;
+
   return (
     <Modal
       aberto={aberto}
@@ -728,11 +785,46 @@ export function ModalProcesso({
             ? 'Altere o que for preciso e salve. O SEI continua copiável na planilha.'
             : 'Só o objeto é obrigatório. O resto pode ser completado depois, na própria linha.'
       }
-      aoFechar={aoFechar}
+      aoFechar={fechar}
       rodape={
-        podeEditar ? (
+        /* A confirmação toma o rodapé inteiro, em vez de abrir uma segunda
+           janela por cima desta: a pergunta nasce onde o dedo já está, e some
+           a chance de fechar a de cima achando que fechou a de baixo. */
+        confirmandoExclusao ? (
           <>
-            <Botao aparencia="neutro" onClick={aoFechar}>
+            <p className="mr-auto flex items-center gap-2 text-sm font-semibold text-red-700">
+              <AlertTriangle className="size-4 shrink-0" />
+              Apagar de vez? Isso não tem como ser desfeito.
+            </p>
+            <Botao
+              aparencia="neutro"
+              onClick={() => setConfirmandoExclusao(false)}
+              disabled={excluindo}
+            >
+              Voltar
+            </Botao>
+            <Botao
+              aparencia="perigo"
+              icone={<Trash2 className="size-4" />}
+              onClick={apagar}
+              carregando={excluindo}
+            >
+              Sim, apagar
+            </Botao>
+          </>
+        ) : podeEditar ? (
+          <>
+            {podeApagar && (
+              <Botao
+                aparencia="perigo"
+                icone={<Trash2 className="size-4" />}
+                className="mr-auto"
+                onClick={() => setConfirmandoExclusao(true)}
+              >
+                Apagar processo
+              </Botao>
+            )}
+            <Botao aparencia="neutro" onClick={fechar}>
               Cancelar
             </Botao>
             <Botao aparencia="primario" onClick={enviar} carregando={salvando}>
@@ -740,7 +832,7 @@ export function ModalProcesso({
             </Botao>
           </>
         ) : (
-          <Botao aparencia="neutro" onClick={aoFechar}>
+          <Botao aparencia="neutro" onClick={fechar}>
             Fechar
           </Botao>
         )

@@ -10,6 +10,24 @@ Sem servidor para manter, sem custo fixo.
 
 ## Como está organizado
 
+### Previsão anual dos contratos
+
+Na ficha de cada contrato, **Previsto para o ano** é informado manualmente.
+Ao lado, **Estimativa mensal** mostra a previsão dividida por 12, apenas como
+referência: os lançamentos mensais continuam livres e independentes.
+**Total lançado** soma os meses; faturas futuras = previsto anual − total lançado;
+saldo = empenho + reservado + SME − faturas futuras.
+A previsão é guardada por contrato e ano. Campo vazio significa não informado.
+
+Para atualizar um banco existente antes de publicar esta versão, aplique apenas
+a migração aditiva (não execute `db:remote`, que recria o banco):
+
+```bash
+npx wrangler d1 execute secretaria-db --remote --file=./migrations/0004_previsoes_contrato.sql
+```
+
+Instalações novas que usam `0001_schema.sql` já incluem a tabela de previsões.
+
 ```
 secretaria-controle/
 ├── migrations/

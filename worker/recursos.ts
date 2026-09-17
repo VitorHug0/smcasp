@@ -55,6 +55,12 @@ export interface Recurso {
   apelido?: string;
 }
 
+const TOTAL_LANCADO_ANO = `(SELECT COALESCE(SUM(pg.valor), 0) FROM pagamentos_contrato pg
+  WHERE pg.id_contrato = c.id AND pg.ano = CAST(strftime('%Y', 'now') AS INTEGER))`;
+const PREVISTO_ANO = `(SELECT pr.valor FROM previsoes_contrato pr WHERE pr.id_contrato = c.id
+  AND pr.ano = CAST(strftime('%Y', 'now') AS INTEGER))`;
+const FATURAS_FUTURAS = `ROUND(COALESCE(${PREVISTO_ANO}, 0) - ${TOTAL_LANCADO_ANO}, 2)`;
+
 export const RECURSOS: Record<string, Recurso> = {
   setores: {
     tabela: 'setores',
@@ -129,11 +135,9 @@ export const RECURSOS: Record<string, Recurso> = {
       },
       { nome: 'gestor', tipo: 'texto', rotulo: 'Gestor' },
       { nome: 'fiscal', tipo: 'texto', rotulo: 'Fiscal' },
-      { nome: 'faturas_futuras', tipo: 'numero', rotulo: 'Faturas futuras' },
       { nome: 'empenho', tipo: 'numero', rotulo: 'Empenho' },
       { nome: 'reservado', tipo: 'numero', rotulo: 'Reservado' },
       { nome: 'sme', tipo: 'numero', rotulo: 'SME' },
-      { nome: 'saldo', tipo: 'numero', rotulo: 'Saldo' },
       { nome: 'valor_total', tipo: 'numero', rotulo: 'Valor global do contrato' },
       { nome: 'id_setor', tipo: 'ref', rotulo: 'Setor responsável' },
       {
@@ -143,15 +147,14 @@ export const RECURSOS: Record<string, Recurso> = {
         rotulo: 'Situação',
       },
     ],
-    // previsto_ano é a coluna TOTAL da planilha de pagamentos: em vez de
-    // guardar o número, soma os doze meses do ano corrente — assim ele nunca
-    // fica em desacordo com os valores lançados mês a mês.
+    // Previsão informada e lançamentos mensais são independentes e por ano.
     select: `
       SELECT c.id, c.sei, c.numero_contrato, c.numero_ultimo_ajuste,
              c.fornecedor, c.objeto,
              c.data_inicio, c.data_fim_vigencia, c.duracao, c.data_base_reajuste,
              c.interesse_renovar, c.gestor, c.fiscal,
-             c.faturas_futuras, c.empenho, c.reservado, c.sme, c.saldo,
+             ${FATURAS_FUTURAS} AS faturas_futuras, c.empenho, c.reservado, c.sme,
+             ROUND(c.empenho + c.reservado + c.sme - (${FATURAS_FUTURAS}), 2) AS saldo,
              c.valor_total, c.id_setor, c.status,
              s.nome  AS setor_nome,
              s.sigla AS setor_sigla,
@@ -159,9 +162,8 @@ export const RECURSOS: Record<string, Recurso> = {
                   ELSE CAST(julianday(c.data_fim_vigencia) - julianday(date('now'))
                             AS INTEGER)
              END AS dias_para_vencer,
-             (SELECT COALESCE(SUM(pg.valor), 0) FROM pagamentos_contrato pg
-               WHERE pg.id_contrato = c.id
-                 AND pg.ano = CAST(strftime('%Y', 'now') AS INTEGER)) AS previsto_ano
+             ${TOTAL_LANCADO_ANO} AS total_lancado_ano,
+             ${PREVISTO_ANO} AS previsto_ano
       FROM contratos c
       LEFT JOIN setores s ON s.id = c.id_setor`,
     // Como na planilha: quem termina antes aparece primeiro. Contrato sem
@@ -172,6 +174,17 @@ export const RECURSOS: Record<string, Recurso> = {
 
   // Valores mês a mês do controle de pagamentos. Recurso próprio para que a
   // tela possa corrigir um mês só, sem reenviar o contrato inteiro.
+  previsoes: {
+    tabela: 'previsoes_contrato',
+    apelido: 'pr',
+    campos: [
+      { nome: 'id_contrato', tipo: 'ref', obrigatorio: true, rotulo: 'Contrato' },
+      { nome: 'ano', tipo: 'inteiro', obrigatorio: true, rotulo: 'Ano' },
+      { nome: 'valor', tipo: 'numero', rotulo: 'Previsto anual' },
+    ],
+    select: 'SELECT pr.id, pr.id_contrato, pr.ano, pr.valor FROM previsoes_contrato pr',
+    ordem: 'pr.ano DESC, pr.id_contrato',
+  },
   pagamentos: {
     tabela: 'pagamentos_contrato',
     apelido: 'pg',

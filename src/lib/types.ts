@@ -214,8 +214,9 @@ export interface Contrato {
   setor_nome?: string | null;
   setor_sigla?: string | null;
   dias_para_vencer?: number | null;
-  /** Coluna TOTAL da planilha: soma dos doze meses do ano corrente. */
-  previsto_ano?: number;
+  /** Previsão anual informada, independente dos lançamentos mensais. */
+  previsto_ano?: number | null;
+  total_lancado_ano?: number;
 }
 
 /** Um mês do controle de pagamentos. valor nulo = célula em branco. */

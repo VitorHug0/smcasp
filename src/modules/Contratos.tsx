@@ -26,6 +26,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
+import { calcularPagamentos } from '../lib/pagamentos';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
 import { opcoesDeSetor } from '../lib/setores';
@@ -214,6 +215,7 @@ export function Contratos({
                 <CartaoContrato
                   key={c.id}
                   contrato={c}
+                  aoSalvarPrevisao={recarregar}
                   aoEditar={() => abrirEdicao(c)}
                   aoExcluir={() => excluir(c)}
                 />
@@ -226,7 +228,6 @@ export function Contratos({
           contratos={filtrada}
           aoMudarContrato={(atualizado) => {
             recarregar();
-            aoMudar();
             return atualizado;
           }}
         />
@@ -316,10 +317,12 @@ function ResumoVigencia({ contratos }: { contratos: Contrato[] }) {
 
 function CartaoContrato({
   contrato,
+  aoSalvarPrevisao,
   aoEditar,
   aoExcluir,
 }: {
   contrato: Contrato;
+  aoSalvarPrevisao: () => void;
   aoEditar: () => void;
   aoExcluir: () => void;
 }) {
@@ -428,12 +431,15 @@ function CartaoContrato({
 
       {/* Números do controle de pagamentos */}
       <div className="mt-auto pt-3">
+        <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+          <PrevisaoContrato contrato={contrato} aoSalvar={aoSalvarPrevisao} />
+        </div>
         {previsto > 0 || contrato.empenho > 0 || contrato.saldo !== 0 ? (
           // Uma linha por valor, com o número alinhado à direita: em reais
           // cheios (contratos passam de R$ 3 milhões) três colunas lado a lado
           // se encostam e ficam ilegíveis.
           <dl className="space-y-1 border-t border-slate-200 pt-3 text-sm">
-            <LinhaValor rotulo={`Previsto em ${ANO_PAGAMENTOS}`} valor={previsto} />
+            <LinhaValor rotulo={`Total lançado em ${ANO_PAGAMENTOS}`} valor={contrato.total_lancado_ano ?? 0} />
             <LinhaValor rotulo="Empenhado" valor={contrato.empenho} />
             <LinhaValor
               rotulo="Saldo"
@@ -453,6 +459,47 @@ function CartaoContrato({
         )}
       </div>
     </li>
+  );
+}
+
+function PrevisaoContrato({ contrato, aoSalvar }: { contrato: Contrato; aoSalvar: () => void }) {
+  const [falha, setFalha] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const podeEditar = usePodeEditar();
+  const previsto = contrato.previsto_ano ?? null;
+  async function salvar(valor: number | null) {
+    if (valor !== null && (!Number.isFinite(valor) || valor < 0)) {
+      setFalha('Informe um valor previsto maior ou igual a zero.');
+      return;
+    }
+    setSalvando(true);
+    setFalha(null);
+    try {
+      await api.previsoes.salvar(contrato.id, ANO_PAGAMENTOS, valor);
+      aoSalvar();
+    } catch (e) {
+      setFalha(e instanceof Error ? e.message : 'Não foi possível salvar a previsão.');
+    } finally { setSalvando(false); }
+  }
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-xs font-semibold text-slate-600">Previsto para {ANO_PAGAMENTOS}</p>
+          <fieldset disabled={salvando} aria-label={`Previsão anual de ${contrato.fornecedor}`}>
+            <ValorEditavel valor={previsto} aoSalvar={salvar} comMoeda destaque />
+          </fieldset>
+          <p className="text-[10px] text-slate-500">{salvando ? 'Salvando…' : podeEditar ? 'Clique no valor para informar' : 'Valor informado'}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-slate-600">Estimativa mensal</p>
+          <p className="py-1 font-semibold tabular-nums text-blue-800">{previsto === null ? '—' : moeda(previsto / 12)}</p>
+          <p className="text-[10px] text-slate-500">Previsto anual ÷ 12 · referência</p>
+        </div>
+      </div>
+      {falha && <p role="alert" className="mt-2 text-xs text-red-700">{falha}</p>}
+      <p className="mt-2 text-[11px] text-slate-500">Os meses são preenchidos separadamente e podem ter valores diferentes.</p>
+    </div>
   );
 }
 
@@ -568,6 +615,7 @@ function PlanilhaPagamentos({
         copia.set(contrato.id, doContrato);
         return copia;
       });
+      aoMudarContrato(contrato);
       setFalha(null);
     } catch (e) {
       setPorMes(anterior);
@@ -604,7 +652,11 @@ function PlanilhaPagamentos({
   };
 
   // Maior previsão primeiro: é onde o dinheiro está e onde o furo dói.
-  const ordenados = [...locais].sort((a, b) => totalDoContrato(b) - totalDoContrato(a));
+  // Mantém a linha no lugar enquanto a pessoa preenche os meses.
+  const ordenados = locais.map((c) => ({
+    ...c,
+    ...calcularPagamentos(c.previsto_ano ?? 0, totalDoContrato(c), c.empenho, c.reservado, c.sme),
+  }));
 
   const somaMes = (mes: number): number =>
     ordenados.reduce((t, c) => t + (porMes?.get(c.id)?.get(mes)?.valor ?? 0), 0);
@@ -614,34 +666,42 @@ function PlanilhaPagamentos({
   return (
     <div className="space-y-3">
       {falha && <AvisoErro mensagem={falha} />}
-      <p className="px-1 text-sm text-slate-600">
+      <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-slate-700">
+      <p>
         <strong className="text-slate-900">{ordenados.length}</strong>{' '}
-        {ordenados.length === 1 ? 'contrato' : 'contratos'} · clique em qualquer valor para
-        corrigir; a coluna <strong>TOTAL</strong> é a soma dos doze meses e se atualiza sozinha.
+        {ordenados.length === 1 ? 'contrato' : 'contratos'} · informe a previsão anual em Vigência e renovação.
+        Preencha os meses com os valores de cada período, Empenho,
+        Reservado e SME. As colunas azuis são calculadas automaticamente.
       </p>
+      <p className="mt-2 text-xs text-slate-600">
+        Total lançado = soma dos meses · Faturas futuras = Previsto para o ano − Total lançado ·
+        Saldo = Empenho + Reservado + SME − Faturas futuras.
+        Valores negativos são mantidos. Empresa e Processo acompanham a rolagem.
+      </p>
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[2250px] table-fixed border-collapse text-left text-[13px]">
+        <div className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" tabIndex={0} role="region" aria-label="Planilha de pagamentos com rolagem horizontal">
+          <table className="w-[2630px] min-w-[2630px] table-fixed border-separate border-spacing-0 text-left text-[13px]">
             <colgroup>
-              <col className="w-[8.5%]" />
-              <col className="w-[8%]" />
+              <col className="w-[190px]" />
+              <col className="w-[190px]" />
               {MESES_CURTOS.map((m) => (
-                <col key={m} className="w-[4.5%]" />
+                <col key={m} className="w-[120px]" />
               ))}
-              <col className="w-[5.5%]" />
-              <col className="w-[5.5%]" />
-              <col className="w-[5.5%]" />
-              <col className="w-[5%]" />
-              <col className="w-[4.5%]" />
-              <col className="w-[6.5%]" />
+              <col className="w-[130px]" />
+              <col className="w-[130px]" />
+              <col className="w-[130px]" />
+              <col className="w-[130px]" />
+              <col className="w-[130px]" />
+              <col className="w-[160px]" />
             </colgroup>
             <thead>
               <tr className="bg-slate-800 text-[10.5px] uppercase tracking-wide text-white">
-                <th className="whitespace-nowrap border-r border-slate-600 px-2 py-2.5 font-bold">
+                <th className="sticky left-0 z-20 whitespace-nowrap border-r border-slate-600 bg-slate-800 px-2 py-2.5 font-bold">
                   Empresa
                 </th>
-                <th className="whitespace-nowrap border-r border-slate-600 px-2 py-2.5 font-bold">
+                <th className="sticky left-[190px] z-20 whitespace-nowrap border-r border-slate-600 bg-slate-800 px-2 py-2.5 font-bold shadow-[4px_0_6px_-4px_#0f172a]">
                   Processo
                 </th>
                 {MESES_CURTOS.map((m) => (
@@ -655,12 +715,13 @@ function PlanilhaPagamentos({
                 {/* "Faturas futuras" tem duas palavras e não cabe em uma
                     linha na largura da coluna, então estes cabeçalhos podem
                     quebrar — ao contrário dos meses, que são curtos. */}
-                {['Total', 'Faturas futuras', 'Empenho', 'Reservado', 'SME', 'Saldo'].map((t) => (
+                {['Total lançado', 'Faturas futuras', 'Empenho', 'Reservado', 'SME', 'Saldo'].map((t) => (
                   <th
                     key={t}
-                    className="border-r border-slate-600 px-1.5 py-2.5 text-right font-bold leading-tight last:border-r-0"
+                    className={`border-r border-slate-600 px-1.5 py-2.5 text-right font-bold leading-tight last:border-r-0 ${['Total lançado', 'Faturas futuras', 'Saldo'].includes(t) ? 'bg-blue-900' : ''}`}
                   >
                     {t}
+                    {['Total lançado', 'Faturas futuras', 'Saldo'].includes(t) && <span className="mt-1 block text-[9px] font-normal normal-case text-blue-200">Automático</span>}
                   </th>
                 ))}
               </tr>
@@ -682,7 +743,7 @@ function PlanilhaPagamentos({
               {/* Um ponto menor que as linhas: as somas do rodapé chegam à
                   casa dos milhões e passariam da largura da coluna do mês. */}
               <tr className="bg-slate-100 text-[12px] font-bold text-slate-900">
-                <td className="border-r border-t-2 border-slate-300 px-2 py-2.5" colSpan={2}>
+                <td className="sticky left-0 z-10 border-r border-t-2 border-slate-300 bg-slate-100 px-2 py-2.5 shadow-[4px_0_6px_-4px_#0f172a]" colSpan={2}>
                   Total de {ordenados.length}{' '}
                   {ordenados.length === 1 ? 'contrato' : 'contratos'}
                 </td>
@@ -735,17 +796,15 @@ function LinhaPagamento({
   aoSalvarCampo: (campo: keyof Contrato, valor: number | null) => void;
 }) {
   const celula = 'border-b border-r border-slate-200 px-1 py-1 align-top';
-  const divergeSaldo = Math.abs(saldoCalculado(contrato) - (contrato.saldo ?? 0)) > 0.01;
-
   return (
-    <tr className="hover:bg-marca-50/40">
-      <td className={`${celula} px-2`}>
+    <tr className="group even:bg-slate-50/50 hover:bg-blue-50/50">
+      <td className={`${celula} sticky left-0 z-10 bg-white px-2 group-hover:bg-blue-50`}>
         <p className="font-semibold leading-snug text-slate-900">{contrato.fornecedor}</p>
         {contrato.numero_contrato && (
           <p className="text-[11px] text-slate-500">Contrato {contrato.numero_contrato}</p>
         )}
       </td>
-      <td className={`${celula} px-2`}>
+      <td className={`${celula} sticky left-[190px] z-10 bg-white px-2 shadow-[4px_0_6px_-4px_#0f172a] group-hover:bg-blue-50`}>
         {contrato.sei ? (
           <BotaoCopiar texto={contrato.sei} className="font-mono text-[11px]" />
         ) : (
@@ -763,16 +822,13 @@ function LinhaPagamento({
       ))}
 
       {/* TOTAL é calculado, então não se edita aqui: muda-se o mês */}
-      <td className={`${celula} bg-slate-50 text-right font-semibold tabular-nums text-slate-900`}>
+      <td className={`${celula} bg-blue-50 text-right font-semibold tabular-nums text-slate-900`}>
         <span className="block px-1.5 py-1" title="Soma dos doze meses">
           {valorSimples(total)}
         </span>
       </td>
-      <td className={celula}>
-        <ValorEditavel
-          valor={contrato.faturas_futuras}
-          aoSalvar={(v) => aoSalvarCampo('faturas_futuras', v)}
-        />
+      <td className={`${celula} bg-blue-50 text-right font-semibold tabular-nums`}>
+        <span className="block px-1.5 py-1" title="Previsto para o ano − Total lançado">{valorSimples(contrato.faturas_futuras)}</span>
       </td>
       <td className={celula}>
         <ValorEditavel valor={contrato.empenho} aoSalvar={(v) => aoSalvarCampo('empenho', v)} />
@@ -783,24 +839,8 @@ function LinhaPagamento({
       <td className={celula}>
         <ValorEditavel valor={contrato.sme} aoSalvar={(v) => aoSalvarCampo('sme', v)} />
       </td>
-      <td className="border-b border-slate-200 px-1 py-1 align-top">
-        <div className="flex items-start justify-end gap-1">
-          {divergeSaldo && (
-            <span
-              className="mt-2 shrink-0"
-              title={`Pela conta da planilha (empenho + reservado + SME − faturas futuras) daria ${moeda(saldoCalculado(contrato))}.`}
-            >
-              <AlertTriangle className="size-3.5 text-amber-600" />
-            </span>
-          )}
-          <ValorEditavel
-            valor={contrato.saldo}
-            destaque
-            comMoeda
-            aoSalvar={(v) => aoSalvarCampo('saldo', v)}
-            className={contrato.saldo < 0 ? 'text-red-700' : 'text-emerald-700'}
-          />
-        </div>
+      <td className={`border-b border-slate-200 bg-blue-50 px-2 py-2 text-right align-top font-bold tabular-nums ${contrato.saldo < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+        <span title="Empenho + Reservado + SME − Faturas futuras">{moeda(contrato.saldo)}</span>
       </td>
     </tr>
   );
@@ -836,11 +876,9 @@ function ModalContrato({
     interesse_renovar: contrato?.interesse_renovar ?? 'Não definido',
     gestor: contrato?.gestor ?? '',
     fiscal: contrato?.fiscal ?? '',
-    faturas_futuras: contrato ? String(contrato.faturas_futuras) : '0',
     empenho: contrato ? String(contrato.empenho) : '0',
     reservado: contrato ? String(contrato.reservado) : '0',
     sme: contrato ? String(contrato.sme) : '0',
-    saldo: contrato ? String(contrato.saldo) : '0',
     id_setor: contrato?.id_setor ? String(contrato.id_setor) : '',
     status: contrato?.status ?? 'Vigente',
   };
@@ -890,11 +928,9 @@ function ModalContrato({
       interesse_renovar: form.interesse_renovar as InteresseRenovar,
       gestor: form.gestor.trim() || null,
       fiscal: form.fiscal.trim() || null,
-      faturas_futuras: paraNumero(form.faturas_futuras),
       empenho: paraNumero(form.empenho),
       reservado: paraNumero(form.reservado),
       sme: paraNumero(form.sme),
-      saldo: paraNumero(form.saldo),
       id_setor: form.id_setor ? Number(form.id_setor) : null,
       status: form.status as StatusContrato,
     };
@@ -1042,12 +1078,6 @@ function ModalContrato({
           </legend>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <CampoDinheiro
-              rotulo="Faturas futuras"
-              valor={form.faturas_futuras}
-              aoMudar={mudar('faturas_futuras')}
-              ajuda="O que ainda vai ser faturado no ano."
-            />
-            <CampoDinheiro
               rotulo="Empenho"
               valor={form.empenho}
               aoMudar={mudar('empenho')}
@@ -1058,13 +1088,8 @@ function ModalContrato({
               aoMudar={mudar('reservado')}
             />
             <CampoDinheiro rotulo="SME" valor={form.sme} aoMudar={mudar('sme')} />
-            <CampoDinheiro
-              rotulo="Saldo"
-              valor={form.saldo}
-              aoMudar={mudar('saldo')}
-              ajuda="Como está na planilha. A tela avisa se não fechar com a conta."
-            />
           </div>
+          <p className="mt-3 text-xs text-slate-500">Total lançado, faturas futuras e saldo são calculados automaticamente a partir da previsão anual, dos meses e dos valores acima.</p>
         </fieldset>
       </div>
     </Modal>

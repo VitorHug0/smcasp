@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, Pencil, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Pencil, Search, Trash2 } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
@@ -60,7 +60,9 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
     api.processos.listar('concluidos'),
   );
   const [emEdicao, setEmEdicao] = useState<Processo | null>(null);
-  const [aviso, setAviso] = useState<string | null>(null);
+  // `apagou` troca o tom do aviso: exclusão não é comemoração, então não sai
+  // de verde com um ✓, como sai "voltou para o quadro".
+  const [aviso, setAviso] = useState<{ texto: string; apagou?: boolean } | null>(null);
   const [busca, setBusca] = useState('');
   const [setorFiltro, setSetorFiltro] = useState('');
   const [modalidadeFiltro, setModalidadeFiltro] = useState('');
@@ -191,14 +193,28 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
       {falha && <AvisoErro mensagem={falha} />}
 
       {aviso && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          <Check className="size-4 shrink-0" />
-          <span className="flex-1">{aviso}</span>
+        <div
+          className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm ${
+            aviso.apagou
+              ? 'border-slate-300 bg-slate-100 text-slate-800'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+          }`}
+        >
+          {aviso.apagou ? (
+            <Trash2 className="size-4 shrink-0" />
+          ) : (
+            <Check className="size-4 shrink-0" />
+          )}
+          <span className="flex-1">{aviso.texto}</span>
           <button
             type="button"
             onClick={() => setAviso(null)}
             aria-label="Fechar aviso"
-            className="rounded-md px-2 py-1 text-emerald-700 hover:bg-emerald-100"
+            className={`rounded-md px-2 py-1 ${
+              aviso.apagou
+                ? 'text-slate-600 hover:bg-slate-200'
+                : 'text-emerald-700 hover:bg-emerald-100'
+            }`}
           >
             Fechar
           </button>
@@ -437,8 +453,14 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
           recarregar();
           if (salvo.etapa !== 'Concluído') {
             setFalha(null);
-            setAviso(`${salvo.objeto} voltou para o quadro, na fase ${salvo.etapa}.`);
+            setAviso({ texto: `${salvo.objeto} voltou para o quadro, na fase ${salvo.etapa}.` });
           }
+        }}
+        aoExcluir={(apagado) => {
+          setEmEdicao(null);
+          recarregar();
+          setFalha(null);
+          setAviso({ texto: `${apagado.objeto} foi apagado e saiu do sistema.`, apagou: true });
         }}
       />
     </div>

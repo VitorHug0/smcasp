@@ -14,7 +14,7 @@
 //  com "nenhum valor".
 // =============================================================================
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
@@ -557,6 +557,92 @@ function PlanilhaPagamentos({
   const [porMes, setPorMes] = useState<PorMes | null>(null);
   const [locais, setLocais] = useState<Contrato[]>(contratos);
   const [falha, setFalha] = useState<string | null>(null);
+  const tabelaRef = useRef<HTMLDivElement>(null);
+  const barraRef = useRef<HTMLDivElement>(null);
+  const mesesRef = useRef<(HTMLTableCellElement | null)[]>([]);
+  const destinoMesRef = useRef<{ indice: number; esquerda: number } | null>(null);
+  const [mesAtivo, setMesAtivo] = useState(0);
+  const [larguraRolavel, setLarguraRolavel] = useState(0);
+  const [topoPlanilha, setTopoPlanilha] = useState(0);
+  const carregandoPlanilha = !porMes && !falha;
+
+  useEffect(() => {
+    const tabela = tabelaRef.current;
+    const barra = barraRef.current;
+    if (!tabela || !barra) return;
+    let ultimaEsquerda = -1;
+    let esquerdaSincronizada = barra.scrollLeft;
+
+    const atualizarMes = () => {
+      // O primeiro mês visível começa depois dos 380px das colunas fixas.
+      const inicio = tabela.getBoundingClientRect().left + tabela.clientLeft + 380;
+      let ativo = 0;
+      mesesRef.current.forEach((mes, i) => {
+        if (mes && mes.getBoundingClientRect().left <= inicio + 1) ativo = i;
+      });
+      if (tabela.scrollLeft > 0 && tabela.scrollLeft >= tabela.scrollWidth - tabela.clientWidth - 1) {
+        ativo = MESES_CURTOS.length - 1;
+      }
+      setMesAtivo(ativo);
+    };
+    const sincronizarTabela = () => {
+      if (Math.abs(barra.scrollLeft - tabela.scrollLeft) > 1) {
+        barra.scrollLeft = tabela.scrollLeft;
+        esquerdaSincronizada = barra.scrollLeft;
+      }
+      const destino = destinoMesRef.current;
+      if (destino && Math.abs(tabela.scrollLeft - destino.esquerda) <= 1) {
+        setMesAtivo(destino.indice);
+        destinoMesRef.current = null;
+      } else if (tabela.scrollLeft !== ultimaEsquerda) {
+        atualizarMes();
+      }
+      ultimaEsquerda = tabela.scrollLeft;
+    };
+    const sincronizarBarra = () => {
+      // Eventos gerados pela própria sincronização não interrompem o scroll suave.
+      if (Math.abs(barra.scrollLeft - esquerdaSincronizada) <= 1) return;
+      destinoMesRef.current = null;
+      if (Math.abs(tabela.scrollLeft - barra.scrollLeft) > 1) {
+        tabela.scrollLeft = barra.scrollLeft;
+      }
+    };
+    const medir = () => {
+      setTopoPlanilha(cabecalhoPagina?.getBoundingClientRect().height ?? 0);
+      setLarguraRolavel(tabela.scrollWidth > tabela.clientWidth ? tabela.scrollWidth : 0);
+      sincronizarTabela();
+    };
+    const cabecalhoPagina = tabela.closest('main')?.previousElementSibling;
+    const observador = new ResizeObserver(medir);
+    observador.observe(tabela);
+    if (cabecalhoPagina) observador.observe(cabecalhoPagina);
+    if (tabela.firstElementChild) observador.observe(tabela.firstElementChild);
+    tabela.addEventListener('scroll', sincronizarTabela, { passive: true });
+    barra.addEventListener('scroll', sincronizarBarra, { passive: true });
+    medir();
+    return () => {
+      observador.disconnect();
+      tabela.removeEventListener('scroll', sincronizarTabela);
+      barra.removeEventListener('scroll', sincronizarBarra);
+    };
+  }, [carregandoPlanilha]);
+
+  function irParaMes(indice: number) {
+    const tabela = tabelaRef.current;
+    const mes = mesesRef.current[indice];
+    if (!tabela || !mes) return;
+    const esquerda = Math.max(0, Math.min(
+      tabela.scrollWidth - tabela.clientWidth,
+      tabela.scrollLeft + mes.getBoundingClientRect().left
+        - tabela.getBoundingClientRect().left - tabela.clientLeft - 380,
+    ));
+    destinoMesRef.current = { indice, esquerda };
+    setMesAtivo(indice);
+    tabela.scrollTo({
+      left: esquerda,
+      behavior: 'smooth',
+    });
+  }
 
   useEffect(() => setLocais(contratos), [contratos]);
 
@@ -680,8 +766,25 @@ function PlanilhaPagamentos({
       </p>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" tabIndex={0} role="region" aria-label="Planilha de pagamentos com rolagem horizontal">
+      <div
+        className="sticky isolate flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
+        style={{ top: topoPlanilha, maxHeight: `calc(100dvh - ${topoPlanilha + 16}px)` }}
+      >
+        <nav aria-label="Navegar pelos meses de pagamentos" className="z-30 flex shrink-0 flex-wrap gap-1 rounded-t-xl border-b border-slate-200 bg-white p-2">
+          {MESES_CURTOS.map((mes, i) => (
+            <button
+              key={mes}
+              type="button"
+              aria-pressed={mesAtivo === i}
+              onClick={() => irParaMes(i)}
+              className={`rounded px-2 py-1 text-xs font-bold uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 ${mesAtivo === i ? 'bg-blue-700 text-white' : 'text-slate-600 hover:bg-blue-50'}`}
+            >
+              {mes}
+            </button>
+          ))}
+        </nav>
+        {/* A rolagem vertical pertence ao mesmo container do cabeçalho sticky. */}
+        <div ref={tabelaRef} className="min-h-0 max-h-[60dvh] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" tabIndex={0} role="region" aria-label="Planilha de pagamentos com rolagem horizontal e vertical">
           <table className="w-[2630px] min-w-[2630px] table-fixed border-separate border-spacing-0 text-left text-[13px]">
             <colgroup>
               <col className="w-[190px]" />
@@ -696,7 +799,7 @@ function PlanilhaPagamentos({
               <col className="w-[130px]" />
               <col className="w-[160px]" />
             </colgroup>
-            <thead>
+            <thead className="sticky top-0 z-20">
               <tr className="bg-slate-800 text-[10.5px] uppercase tracking-wide text-white">
                 <th className="sticky left-0 z-20 whitespace-nowrap border-r border-slate-600 bg-slate-800 px-2 py-2.5 font-bold">
                   Empresa
@@ -704,10 +807,11 @@ function PlanilhaPagamentos({
                 <th className="sticky left-[190px] z-20 whitespace-nowrap border-r border-slate-600 bg-slate-800 px-2 py-2.5 font-bold shadow-[4px_0_6px_-4px_#0f172a]">
                   Processo
                 </th>
-                {MESES_CURTOS.map((m) => (
+                {MESES_CURTOS.map((m, i) => (
                   <th
                     key={m}
-                    className="whitespace-nowrap border-r border-slate-600 px-1.5 py-2.5 text-right font-bold"
+                    ref={(elemento) => { mesesRef.current[i] = elemento; }}
+                    className="whitespace-nowrap border-r border-slate-600 bg-slate-800 px-1.5 py-2.5 text-right font-bold"
                   >
                     {m}/{String(ANO_PAGAMENTOS).slice(2)}
                   </th>
@@ -718,7 +822,7 @@ function PlanilhaPagamentos({
                 {['Total lançado', 'Faturas futuras', 'Empenho', 'Reservado', 'SME', 'Saldo'].map((t) => (
                   <th
                     key={t}
-                    className={`border-r border-slate-600 px-1.5 py-2.5 text-right font-bold leading-tight last:border-r-0 ${['Total lançado', 'Faturas futuras', 'Saldo'].includes(t) ? 'bg-blue-900' : ''}`}
+                    className={`border-r border-slate-600 px-1.5 py-2.5 text-right font-bold leading-tight last:border-r-0 ${['Total lançado', 'Faturas futuras', 'Saldo'].includes(t) ? 'bg-blue-900' : 'bg-slate-800'}`}
                   >
                     {t}
                     {['Total lançado', 'Faturas futuras', 'Saldo'].includes(t) && <span className="mt-1 block text-[9px] font-normal normal-case text-blue-200">Automático</span>}
@@ -776,6 +880,16 @@ function PlanilhaPagamentos({
               </tr>
             </tfoot>
           </table>
+        </div>
+        <div
+          ref={barraRef}
+          tabIndex={larguraRolavel ? 0 : -1}
+          role="region"
+          aria-label="Rolagem horizontal auxiliar dos pagamentos"
+          hidden={!larguraRolavel}
+          className="sticky bottom-0 z-30 shrink-0 overflow-x-scroll rounded-b-xl border-t border-slate-200 bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+        >
+          <div style={{ width: larguraRolavel, height: 16 }} />
         </div>
       </div>
     </div>

@@ -16,6 +16,7 @@
 DROP TABLE IF EXISTS aquisicoes;
 DROP TABLE IF EXISTS processos;
 DROP TABLE IF EXISTS pagamentos_contrato;
+DROP TABLE IF EXISTS previsoes_contrato;
 DROP TABLE IF EXISTS contratos;
 DROP TABLE IF EXISTS emendas;
 DROP TABLE IF EXISTS usuarios;
@@ -227,6 +228,13 @@ CREATE TABLE pagamentos_contrato (
 );
 CREATE INDEX idx_pagamentos_contrato ON pagamentos_contrato(id_contrato);
 CREATE INDEX idx_pagamentos_ano      ON pagamentos_contrato(ano);
+CREATE TABLE previsoes_contrato (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id_contrato INTEGER NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
+  ano INTEGER NOT NULL CHECK (ano BETWEEN 2000 AND 2100),
+  valor REAL CHECK (valor IS NULL OR valor >= 0),
+  UNIQUE (id_contrato, ano)
+);
 
 -- -----------------------------------------------------------------------------
 -- PROCESSOS — quadro do fluxo interno

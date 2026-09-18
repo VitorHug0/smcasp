@@ -271,6 +271,14 @@ async function criar(env: Env, nome: string, request: Request): Promise<Response
   validarRegras(nome, dados);
   ajustarDataDeConclusao(nome, dados);
 
+  if (nome === 'previsoes') {
+    const criado = await env.DB.prepare(`INSERT INTO previsoes_contrato (id_contrato, ano, valor)
+      VALUES (?, ?, ?) ON CONFLICT(id_contrato, ano) DO UPDATE SET valor = excluded.valor RETURNING id`)
+      .bind(dados.id_contrato as number, dados.ano as number, dados.valor as number | null)
+      .first<{ id: number }>();
+    return criado ? obter(env, nome, criado.id) : erro('Não foi possível salvar a previsão.', 500);
+  }
+
   const { sql, valores } = montarInsert(recurso.tabela, limparNulos(dados));
   const criado = await env.DB.prepare(sql).bind(...valores).first<{ id: number }>();
   if (!criado) return erro('Não foi possível cadastrar o registro.', 500);
@@ -369,7 +377,7 @@ async function montarDashboard(env: Env, anoParam: string | null): Promise<Dashb
       // Os contratos reais não trazem "valor pago": a planilha da Coordenadoria
       // controla o previsto do ano (soma dos meses) e o quanto está empenhado.
       env.DB.prepare(`
-        SELECT COALESCE((SELECT SUM(pg.valor) FROM pagamentos_contrato pg
+        SELECT COALESCE((SELECT SUM(pg.valor) FROM previsoes_contrato pg
                           JOIN contratos c2 ON c2.id = pg.id_contrato
                          WHERE pg.ano = ? AND c2.status = 'Vigente'), 0)
                  AS previsto_ano,

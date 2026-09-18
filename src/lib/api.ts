@@ -172,6 +172,10 @@ export const api = {
   },
 
   /** Valores mês a mês do controle de pagamentos. */
+  previsoes: {
+    salvar: (id_contrato: number, ano: number, valor: number | null) =>
+      pedir('/previsoes', { method: 'POST', ...corpo({ id_contrato, ano, valor }) }),
+  },
   pagamentos: {
     listar: (ano: number) => pedir<Pagamento[]>(`/pagamentos?ano=${ano}`),
     /** Lança um mês que ainda não existia na planilha. */

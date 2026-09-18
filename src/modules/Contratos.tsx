@@ -558,20 +558,16 @@ function PlanilhaPagamentos({
   const [locais, setLocais] = useState<Contrato[]>(contratos);
   const [falha, setFalha] = useState<string | null>(null);
   const tabelaRef = useRef<HTMLDivElement>(null);
-  const barraRef = useRef<HTMLDivElement>(null);
   const mesesRef = useRef<(HTMLTableCellElement | null)[]>([]);
   const destinoMesRef = useRef<{ indice: number; esquerda: number } | null>(null);
   const [mesAtivo, setMesAtivo] = useState(0);
-  const [larguraRolavel, setLarguraRolavel] = useState(0);
   const [topoPlanilha, setTopoPlanilha] = useState(0);
   const carregandoPlanilha = !porMes && !falha;
 
   useEffect(() => {
     const tabela = tabelaRef.current;
-    const barra = barraRef.current;
-    if (!tabela || !barra) return;
+    if (!tabela) return;
     let ultimaEsquerda = -1;
-    let esquerdaSincronizada = barra.scrollLeft;
 
     const atualizarMes = () => {
       // O primeiro mês visível começa depois dos 380px das colunas fixas.
@@ -586,10 +582,6 @@ function PlanilhaPagamentos({
       setMesAtivo(ativo);
     };
     const sincronizarTabela = () => {
-      if (Math.abs(barra.scrollLeft - tabela.scrollLeft) > 1) {
-        barra.scrollLeft = tabela.scrollLeft;
-        esquerdaSincronizada = barra.scrollLeft;
-      }
       const destino = destinoMesRef.current;
       if (destino && Math.abs(tabela.scrollLeft - destino.esquerda) <= 1) {
         setMesAtivo(destino.indice);
@@ -599,17 +591,8 @@ function PlanilhaPagamentos({
       }
       ultimaEsquerda = tabela.scrollLeft;
     };
-    const sincronizarBarra = () => {
-      // Eventos gerados pela própria sincronização não interrompem o scroll suave.
-      if (Math.abs(barra.scrollLeft - esquerdaSincronizada) <= 1) return;
-      destinoMesRef.current = null;
-      if (Math.abs(tabela.scrollLeft - barra.scrollLeft) > 1) {
-        tabela.scrollLeft = barra.scrollLeft;
-      }
-    };
     const medir = () => {
       setTopoPlanilha(cabecalhoPagina?.getBoundingClientRect().height ?? 0);
-      setLarguraRolavel(tabela.scrollWidth > tabela.clientWidth ? tabela.scrollWidth : 0);
       sincronizarTabela();
     };
     const cabecalhoPagina = tabela.closest('main')?.previousElementSibling;
@@ -618,12 +601,10 @@ function PlanilhaPagamentos({
     if (cabecalhoPagina) observador.observe(cabecalhoPagina);
     if (tabela.firstElementChild) observador.observe(tabela.firstElementChild);
     tabela.addEventListener('scroll', sincronizarTabela, { passive: true });
-    barra.addEventListener('scroll', sincronizarBarra, { passive: true });
     medir();
     return () => {
       observador.disconnect();
       tabela.removeEventListener('scroll', sincronizarTabela);
-      barra.removeEventListener('scroll', sincronizarBarra);
     };
   }, [carregandoPlanilha]);
 
@@ -752,10 +733,14 @@ function PlanilhaPagamentos({
   return (
     <div className="space-y-3">
       {falha && <AvisoErro mensagem={falha} />}
-      <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-slate-700">
-      <p>
+      <details className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2 text-xs text-slate-600">
+      <summary className="cursor-pointer list-none rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 [&::-webkit-details-marker]:hidden">
         <strong className="text-slate-900">{ordenados.length}</strong>{' '}
-        {ordenados.length === 1 ? 'contrato' : 'contratos'} · informe a previsão anual em Vigência e renovação.
+        {ordenados.length === 1 ? 'contrato' : 'contratos'} · Pagamentos {ANO_PAGAMENTOS} ·{' '}
+        <span className="font-medium text-blue-700">ⓘ Como funciona</span>
+      </summary>
+      <p className="mt-2">
+        Informe a previsão anual em Vigência e renovação.
         Preencha os meses com os valores de cada período, Empenho,
         Reservado e SME. As colunas azuis são calculadas automaticamente.
       </p>
@@ -764,26 +749,26 @@ function PlanilhaPagamentos({
         Saldo = Empenho + Reservado + SME − Faturas futuras.
         Valores negativos são mantidos. Empresa e Processo acompanham a rolagem.
       </p>
-      </div>
+      </details>
 
       <div
         className="sticky isolate flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
         style={{ top: topoPlanilha, maxHeight: `calc(100dvh - ${topoPlanilha + 16}px)` }}
       >
-        <nav aria-label="Navegar pelos meses de pagamentos" className="z-30 flex shrink-0 flex-wrap gap-1 rounded-t-xl border-b border-slate-200 bg-white p-2">
+        <nav aria-label="Navegar pelos meses de pagamentos" className="z-30 flex shrink-0 flex-wrap gap-0.5 rounded-t-xl border-b border-slate-200 bg-white px-2 py-1.5">
           {MESES_CURTOS.map((mes, i) => (
             <button
               key={mes}
               type="button"
               aria-pressed={mesAtivo === i}
               onClick={() => irParaMes(i)}
-              className={`rounded px-2 py-1 text-xs font-bold uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 ${mesAtivo === i ? 'bg-blue-700 text-white' : 'text-slate-600 hover:bg-blue-50'}`}
+              className={`rounded px-2 py-1 text-[11px] font-medium uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 ${mesAtivo === i ? 'bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
             >
               {mes}
             </button>
           ))}
         </nav>
-        {/* A rolagem vertical pertence ao mesmo container do cabeçalho sticky. */}
+        {/* Uma única barra nativa no limite da área rolável, com mouse/trackpad preservados. */}
         <div ref={tabelaRef} className="min-h-0 max-h-[60dvh] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" tabIndex={0} role="region" aria-label="Planilha de pagamentos com rolagem horizontal e vertical">
           <table className="w-[2630px] min-w-[2630px] table-fixed border-separate border-spacing-0 text-left text-[13px]">
             <colgroup>
@@ -804,14 +789,14 @@ function PlanilhaPagamentos({
                 <th className="sticky left-0 z-20 whitespace-nowrap border-r border-slate-600 bg-slate-800 px-2 py-2.5 font-bold">
                   Empresa
                 </th>
-                <th className="sticky left-[190px] z-20 whitespace-nowrap border-r border-slate-600 bg-slate-800 px-2 py-2.5 font-bold shadow-[4px_0_6px_-4px_#0f172a]">
+                <th className="sticky left-[190px] z-20 whitespace-nowrap border-r-2 border-slate-500 bg-slate-800 px-2 py-2.5 font-bold shadow-[5px_0_8px_-5px_#0f172a]">
                   Processo
                 </th>
                 {MESES_CURTOS.map((m, i) => (
                   <th
                     key={m}
                     ref={(elemento) => { mesesRef.current[i] = elemento; }}
-                    className="whitespace-nowrap border-r border-slate-600 bg-slate-800 px-1.5 py-2.5 text-right font-bold"
+                    className={`whitespace-nowrap border-r border-slate-600 px-1.5 py-2.5 text-right font-bold ${mesAtivo === i ? 'bg-blue-100 text-blue-950' : 'bg-slate-800'}`}
                   >
                     {m}/{String(ANO_PAGAMENTOS).slice(2)}
                   </th>
@@ -836,6 +821,7 @@ function PlanilhaPagamentos({
                   key={c.id}
                   contrato={c}
                   meses={porMes?.get(c.id)}
+                  mesAtivo={mesAtivo}
                   total={totalDoContrato(c)}
                   aoSalvarMes={(mes, valor) => salvarMes(c, mes, valor)}
                   aoSalvarCampo={(campo, valor) => salvarCampo(c, campo, valor)}
@@ -843,36 +829,36 @@ function PlanilhaPagamentos({
               ))}
             </tbody>
             {/* Totais da planilha inteira: é o número que se leva para a reunião */}
-            <tfoot>
+            <tfoot className="sticky bottom-0 z-20 bg-slate-100 shadow-[0_-4px_8px_-6px_#0f172a]">
               {/* Um ponto menor que as linhas: as somas do rodapé chegam à
                   casa dos milhões e passariam da largura da coluna do mês. */}
               <tr className="bg-slate-100 text-[12px] font-bold text-slate-900">
-                <td className="sticky left-0 z-10 border-r border-t-2 border-slate-300 bg-slate-100 px-2 py-2.5 shadow-[4px_0_6px_-4px_#0f172a]" colSpan={2}>
+                <td className="sticky left-0 z-10 border-r-2 border-t-2 border-slate-300 bg-slate-100 px-2 py-2.5 shadow-[5px_0_8px_-5px_#0f172a]" colSpan={2}>
                   Total de {ordenados.length}{' '}
                   {ordenados.length === 1 ? 'contrato' : 'contratos'}
                 </td>
                 {MESES_CURTOS.map((m, i) => (
                   <td
                     key={m}
-                    className="border-r border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums"
+                    className={`border-r border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums ${mesAtivo === i ? 'bg-blue-50' : ''} ${tomDoValorPagamento(somaMes(i + 1))}`}
                   >
                     {valorSimples(somaMes(i + 1))}
                   </td>
                 ))}
-                <td className="border-r border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums">
+                <td className={`border-r border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums ${tomDoValorPagamento(ordenados.reduce((t, c) => t + totalDoContrato(c), 0))}`}>
                   {valorSimples(ordenados.reduce((t, c) => t + totalDoContrato(c), 0))}
                 </td>
                 {(['faturas_futuras', 'empenho', 'reservado', 'sme'] as const).map((campo) => (
                   <td
                     key={campo}
-                    className="border-r border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums"
+                    className={`border-r border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums ${tomDoValorPagamento(somaCampo(campo))}`}
                   >
                     {valorSimples(somaCampo(campo))}
                   </td>
                 ))}
                 <td
                   className={`border-t-2 border-slate-300 px-1.5 py-2.5 text-right tabular-nums ${
-                    somaCampo('saldo') < 0 ? 'text-red-700' : 'text-emerald-700'
+                    tomDoValorPagamento(somaCampo('saldo'))
                   }`}
                 >
                   {moeda(somaCampo('saldo'))}
@@ -881,30 +867,30 @@ function PlanilhaPagamentos({
             </tfoot>
           </table>
         </div>
-        <div
-          ref={barraRef}
-          tabIndex={larguraRolavel ? 0 : -1}
-          role="region"
-          aria-label="Rolagem horizontal auxiliar dos pagamentos"
-          hidden={!larguraRolavel}
-          className="sticky bottom-0 z-30 shrink-0 overflow-x-scroll rounded-b-xl border-t border-slate-200 bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
-        >
-          <div style={{ width: larguraRolavel, height: 16 }} />
-        </div>
       </div>
     </div>
   );
 }
 
+/** Apenas apresentação: zero informado e ausência continuam sendo valores distintos. */
+function tomDoValorPagamento(valor: number | null | undefined): string {
+  if (valor == null) return '!text-slate-400';
+  if (valor < 0) return 'text-red-700 font-medium';
+  if (valor === 0) return 'text-slate-500';
+  return 'text-slate-800';
+}
+
 function LinhaPagamento({
   contrato,
   meses,
+  mesAtivo,
   total,
   aoSalvarMes,
   aoSalvarCampo,
 }: {
   contrato: Contrato;
   meses: Map<number, Pagamento> | undefined;
+  mesAtivo: number;
   total: number;
   aoSalvarMes: (mes: number, valor: number | null) => void;
   aoSalvarCampo: (campo: keyof Contrato, valor: number | null) => void;
@@ -918,7 +904,7 @@ function LinhaPagamento({
           <p className="text-[11px] text-slate-500">Contrato {contrato.numero_contrato}</p>
         )}
       </td>
-      <td className={`${celula} sticky left-[190px] z-10 bg-white px-2 shadow-[4px_0_6px_-4px_#0f172a] group-hover:bg-blue-50`}>
+      <td className={`${celula} sticky left-[190px] z-10 border-r-2 border-r-slate-300 bg-white px-2 shadow-[5px_0_8px_-5px_#0f172a] group-hover:bg-blue-50`}>
         {contrato.sei ? (
           <BotaoCopiar texto={contrato.sei} className="font-mono text-[11px]" />
         ) : (
@@ -927,8 +913,9 @@ function LinhaPagamento({
       </td>
 
       {MESES_CURTOS.map((m, i) => (
-        <td key={m} className={celula}>
+        <td key={m} className={`${celula} ${mesAtivo === i ? 'bg-blue-50 group-hover:bg-blue-100/70' : ''}`}>
           <ValorEditavel
+            className={tomDoValorPagamento(meses?.get(i + 1)?.valor)}
             valor={meses?.get(i + 1)?.valor ?? null}
             aoSalvar={(valor) => aoSalvarMes(i + 1, valor)}
           />
@@ -936,24 +923,24 @@ function LinhaPagamento({
       ))}
 
       {/* TOTAL é calculado, então não se edita aqui: muda-se o mês */}
-      <td className={`${celula} bg-blue-50 text-right font-semibold tabular-nums text-slate-900`}>
+      <td className={`${celula} bg-blue-50 text-right font-semibold tabular-nums ${tomDoValorPagamento(total)}`}>
         <span className="block px-1.5 py-1" title="Soma dos doze meses">
           {valorSimples(total)}
         </span>
       </td>
-      <td className={`${celula} bg-blue-50 text-right font-semibold tabular-nums`}>
+      <td className={`${celula} bg-blue-50 text-right font-semibold tabular-nums ${tomDoValorPagamento(contrato.faturas_futuras)}`}>
         <span className="block px-1.5 py-1" title="Previsto para o ano − Total lançado">{valorSimples(contrato.faturas_futuras)}</span>
       </td>
       <td className={celula}>
-        <ValorEditavel valor={contrato.empenho} aoSalvar={(v) => aoSalvarCampo('empenho', v)} />
+        <ValorEditavel className={tomDoValorPagamento(contrato.empenho)} valor={contrato.empenho} aoSalvar={(v) => aoSalvarCampo('empenho', v)} />
       </td>
       <td className={celula}>
-        <ValorEditavel valor={contrato.reservado} aoSalvar={(v) => aoSalvarCampo('reservado', v)} />
+        <ValorEditavel className={tomDoValorPagamento(contrato.reservado)} valor={contrato.reservado} aoSalvar={(v) => aoSalvarCampo('reservado', v)} />
       </td>
       <td className={celula}>
-        <ValorEditavel valor={contrato.sme} aoSalvar={(v) => aoSalvarCampo('sme', v)} />
+        <ValorEditavel className={tomDoValorPagamento(contrato.sme)} valor={contrato.sme} aoSalvar={(v) => aoSalvarCampo('sme', v)} />
       </td>
-      <td className={`border-b border-slate-200 bg-blue-50 px-2 py-2 text-right align-top font-bold tabular-nums ${contrato.saldo < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+      <td className={`border-b border-slate-200 bg-blue-50 px-2 py-2 text-right align-top font-bold tabular-nums ${tomDoValorPagamento(contrato.saldo)}`}>
         <span title="Empenho + Reservado + SME − Faturas futuras">{moeda(contrato.saldo)}</span>
       </td>
     </tr>

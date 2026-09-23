@@ -139,6 +139,11 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
     setModalAberto(true);
   }
 
+  function fecharModal() {
+    setModalAberto(false);
+    setEmEdicao(null);
+  }
+
   /**
    * Exporta o que está à vista, não o banco inteiro: quem filtrou por
    * responsável e depois exportou espera receber aquelas linhas, e não uma
@@ -403,18 +408,18 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
         processo={emEdicao}
         setores={setores}
         usuarios={usuarios}
-        aoFechar={() => setModalAberto(false)}
+        aoFechar={fecharModal}
         aoSalvar={(salvo) => {
           setLista(
             emEdicao
               ? processos.map((p) => (p.id === salvo.id ? salvo : p))
               : [salvo, ...processos],
           );
-          setModalAberto(false);
+          fecharModal();
         }}
         aoExcluir={(removido) => {
           setLista(processos.filter((p) => p.id !== removido.id));
-          setModalAberto(false);
+          fecharModal();
           setApagado(removido.objeto);
         }}
       />

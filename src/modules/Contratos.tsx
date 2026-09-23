@@ -1032,6 +1032,7 @@ function ModalContrato({
       empenho: paraNumero(form.empenho),
       reservado: paraNumero(form.reservado),
       sme: paraNumero(form.sme),
+      valor_total: contrato?.valor_total ?? 0,
       id_setor: form.id_setor ? Number(form.id_setor) : null,
       status: form.status as StatusContrato,
     };

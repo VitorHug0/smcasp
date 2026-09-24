@@ -1,345 +1,158 @@
-// =============================================================================
-//  MÓDULO 3 — Compras e destino
-//  Tabela buscável do que foi comprado, por quanto, quantas unidades e qual
-//  setor recebeu. Cadastro rápido em janela, sem sair da tela.
-// =============================================================================
-
 import { useMemo, useState } from 'react';
-import { Plus, Search, Trash2 } from 'lucide-react';
+import { Eye, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
-import { opcoesDeSetor, rotuloDoSetor, setoresPorGrupo } from '../lib/setores';
-import { dataBR, hojeISO, moeda, numero, paraNumero } from '../lib/formato';
+import { setoresPorGrupo, rotuloDoSetor } from '../lib/setores';
+import { dataBR, moeda, numero } from '../lib/formato';
 import { Botao } from '../components/ui/Botao';
 import { Modal } from '../components/ui/Modal';
-import { CampoDinheiro, CampoLista, CampoTexto } from '../components/ui/Campo';
 import { Etiqueta } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha, Vazio } from '../components/ui/Estados';
-import type { Aquisicao, Contrato, Setor } from '../lib/types';
+import {
+  FormularioCompra, dadosDoFormulario, estadoCompraInicial, validarFormularioCompra,
+  type FormularioCompraEstado,
+} from '../components/compras/FormularioCompra';
+import type { Compra, Contrato, Setor } from '../lib/types';
 
-interface Props {
-  setores: Setor[];
-  contratos: Contrato[];
-}
+interface Props { setores: Setor[]; contratos: Contrato[] }
 
-export function Compras({ setores, contratos }: Props) {
-  // Leitor consulta a lista e os totais; registrar e excluir compra, não.
+export function Compras({ setores }: Props) {
   const podeEditar = usePodeEditar();
-  const { dados, carregando, erro, recarregar } = useDados<Aquisicao[]>(() =>
-    api.aquisicoes.listar(),
-  );
+  const { dados, carregando, erro, recarregar } = useDados<Compra[]>(() => api.compras.listar());
   const [busca, setBusca] = useState('');
   const [setorFiltro, setSetorFiltro] = useState('');
-  const [modalAberto, setModalAberto] = useState(false);
-
+  const [selecionada, setSelecionada] = useState<Compra | null>(null);
+  const [modo, setModo] = useState<'ver' | 'editar' | 'novo' | null>(null);
+  const [carregandoCompra, setCarregandoCompra] = useState(false);
   const lista = dados ?? [];
 
   const filtrada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-    return lista.filter((a) => {
-      const casaBusca =
-        !termo ||
-        a.item_comprado.toLowerCase().includes(termo) ||
-        (a.setor_nome ?? '').toLowerCase().includes(termo) ||
-        (a.contrato_numero ?? '').toLowerCase().includes(termo);
-      const casaSetor = !setorFiltro || String(a.id_setor_destino ?? '') === setorFiltro;
-      return casaBusca && casaSetor;
+    return lista.filter((compra) => {
+      const casaBusca = !termo || [compra.numero_empenho, compra.numero_processo,
+        compra.fornecedor_nome, compra.setor_nome].some((v) => (v ?? '').toLowerCase().includes(termo));
+      return casaBusca && (!setorFiltro || String(compra.id_setor_responsavel) === setorFiltro);
     });
   }, [lista, busca, setorFiltro]);
 
-  const totalFiltrado = filtrada.reduce((soma, a) => soma + a.valor_total, 0);
+  async function abrir(compra: Compra, proximoModo: 'ver' | 'editar') {
+    setCarregandoCompra(true);
+    try { setSelecionada(await api.compras.obter(compra.id)); setModo(proximoModo); }
+    catch (e) { alert(e instanceof ErroDaApi ? e.message : 'Não foi possível abrir a compra.'); }
+    finally { setCarregandoCompra(false); }
+  }
 
-  async function excluir(a: Aquisicao) {
-    if (!confirm(`Excluir a compra "${a.item_comprado}"? Essa ação não pode ser desfeita.`)) return;
-    try {
-      await api.aquisicoes.excluir(a.id);
-      recarregar();
-    } catch {
-      alert('Não foi possível excluir. Tente novamente.');
-    }
+  async function excluir(compra: Compra) {
+    if (!confirm(`Excluir ${compra.numero_empenho ? `a compra do Empenho ${compra.numero_empenho}` : 'este registro histórico'}?`)) return;
+    try { await api.compras.excluir(compra.id); recarregar(); }
+    catch (e) { alert(e instanceof ErroDaApi ? e.message : 'Não foi possível excluir.'); }
   }
 
   if (carregando) return <Carregando texto="Buscando as compras registradas…" />;
   if (erro) return <Falha mensagem={erro} aoTentarDeNovo={recarregar} />;
 
-  return (
-    <div className="space-y-4">
-      {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="relative min-w-56 flex-1">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="search"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Procurar por item, setor ou contrato…"
-            aria-label="Procurar compras"
-            className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-3 text-base focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
-          />
-        </div>
-        <select
-          value={setorFiltro}
-          onChange={(e) => setSetorFiltro(e.target.value)}
-          aria-label="Filtrar por setor que recebeu"
-          className="cursor-pointer rounded-lg border border-slate-300 px-3 py-2.5 text-base focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
-        >
-          <option value="">Todos os setores</option>
-          {setoresPorGrupo(setores).map(([grupo, itens]) => (
-            <optgroup key={grupo} label={grupo}>
-              {itens.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {rotuloDoSetor(s)}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        {podeEditar && (
-          <Botao
-            aparencia="primario"
-            icone={<Plus className="size-4" />}
-            onClick={() => setModalAberto(true)}
-          >
-            Registrar compra
-          </Botao>
-        )}
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="relative min-w-56 flex-1">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+        <input type="search" value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder="Procurar por empenho, processo ou fornecedor…" aria-label="Procurar compras"
+          className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-3 text-base focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100" />
       </div>
-
-      {/* Resumo do que está na tela */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-1 text-sm text-slate-600">
-        <span>
-          <strong className="text-slate-900">{numero(filtrada.length)}</strong>{' '}
-          {filtrada.length === 1 ? 'compra listada' : 'compras listadas'}
-        </span>
-        <span>
-          Total: <strong className="text-slate-900">{moeda(totalFiltrado)}</strong>
-        </span>
-      </div>
-
-      {filtrada.length === 0 ? (
-        <Vazio
-          titulo="Nenhuma compra encontrada"
-          texto={
-            podeEditar
-              ? 'Ajuste a busca ou registre uma nova aquisição.'
-              : 'Ajuste a busca para ver as compras registradas.'
-          }
-          acao={
-            podeEditar ? (
-              <Botao
-                aparencia="primario"
-                icone={<Plus className="size-4" />}
-                onClick={() => setModalAberto(true)}
-              >
-                Registrar compra
-              </Botao>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Item comprado</th>
-                  <th className="px-4 py-3 text-right font-semibold">Qtd.</th>
-                  <th className="px-4 py-3 text-right font-semibold">Valor</th>
-                  <th className="px-4 py-3 font-semibold">Setor que recebeu</th>
-                  <th className="px-4 py-3 font-semibold">Contrato</th>
-                  <th className="px-4 py-3 font-semibold">Data</th>
-                  {podeEditar && <th className="px-4 py-3" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtrada.map((a) => (
-                  <tr key={a.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-semibold text-slate-900">{a.item_comprado}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700">
-                      {numero(a.quantidade)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                      {moeda(a.valor_total)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {a.setor_sigla ? (
-                        <Etiqueta tom="azul">{a.setor_sigla}</Etiqueta>
-                      ) : (
-                        <span className="text-slate-400">Não informado</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{a.contrato_numero ?? '—'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-600">
-                      {dataBR(a.data_compra)}
-                    </td>
-                    {podeEditar && (
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => excluir(a)}
-                          aria-label={`Excluir ${a.item_comprado}`}
-                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        >
-                          <Trash2 className="size-4" />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <ModalNovaCompra
-        aberto={modalAberto}
-        setores={setores}
-        contratos={contratos}
-        aoFechar={() => setModalAberto(false)}
-        aoSalvar={() => {
-          setModalAberto(false);
-          recarregar();
-        }}
-      />
+      <select value={setorFiltro} onChange={(e) => setSetorFiltro(e.target.value)} aria-label="Filtrar por setor responsável"
+        className="cursor-pointer rounded-lg border border-slate-300 px-3 py-2.5 text-base focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100">
+        <option value="">Todos os setores</option>
+        {setoresPorGrupo(setores).map(([grupo, itens]) => <optgroup key={grupo} label={grupo}>
+          {itens.map((s) => <option key={s.id} value={s.id}>{rotuloDoSetor(s)}</option>)}
+        </optgroup>)}
+      </select>
+      {podeEditar && <Botao aparencia="primario" icone={<Plus className="size-4" />} onClick={() => { setSelecionada(null); setModo('novo'); }}>Nova compra</Botao>}
     </div>
-  );
+
+    <div className="flex flex-wrap gap-x-6 px-1 text-sm text-slate-600">
+      <span><strong className="text-slate-900">{numero(filtrada.length)}</strong> {filtrada.length === 1 ? 'empenho' : 'empenhos'}</span>
+      <span>Total: <strong className="text-slate-900">{moeda(filtrada.reduce((s, c) => s + c.valor_total, 0))}</strong></span>
+    </div>
+
+    {filtrada.length === 0 ? <Vazio titulo="Nenhuma compra encontrada" texto="Ajuste os filtros ou registre um novo empenho."
+      acao={podeEditar ? <Botao aparencia="primario" onClick={() => setModo('novo')}>Nova compra</Botao> : undefined} /> :
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>
+            {['Empenho', 'Processo', 'Data', 'Fornecedor', 'Setor', 'Itens', 'Valor total', 'Ações'].map((h) => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}
+          </tr></thead>
+          <tbody className="divide-y divide-slate-100">{filtrada.map((compra) => <tr key={compra.id} className="hover:bg-slate-50">
+            <td className="px-4 py-3 font-semibold text-slate-900">{compra.numero_empenho ?? 'Registro histórico'}</td>
+            <td className="px-4 py-3 text-slate-600">{compra.numero_processo ?? 'Não informado'}</td>
+            <td className="whitespace-nowrap px-4 py-3 text-slate-600">{dataBR(compra.data_compra)}</td>
+            <td className="max-w-60 truncate px-4 py-3 text-slate-800" title={compra.fornecedor_nome ?? undefined}>{compra.fornecedor_nome ?? 'Não informado'}</td>
+            <td className="px-4 py-3"><Etiqueta tom="azul">{compra.setor_sigla ?? compra.setor_nome ?? '—'}</Etiqueta></td>
+            <td className="px-4 py-3 text-slate-600">{numero(compra.quantidade_itens)} {compra.quantidade_itens === 1 ? 'item' : 'itens'}</td>
+            <td className="px-4 py-3 font-semibold tabular-nums">{moeda(compra.valor_total)}</td>
+            <td className="whitespace-nowrap px-4 py-3">
+              <button type="button" onClick={() => abrir(compra, 'ver')} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Visualizar compra"><Eye className="size-4" /></button>
+              {podeEditar && <><button type="button" onClick={() => abrir(compra, 'editar')} className="rounded-lg p-2 text-slate-500 hover:bg-marca-50 hover:text-marca-700" aria-label="Editar compra"><Pencil className="size-4" /></button>
+                {!compra.id_processo && <button type="button" onClick={() => excluir(compra)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Excluir compra"><Trash2 className="size-4" /></button>}</>}
+            </td>
+          </tr>)}</tbody>
+        </table>
+      </div></div>}
+    {carregandoCompra && <p className="text-sm text-slate-500">Abrindo compra…</p>}
+    <ModalCompra aberto={modo !== null} modo={modo ?? 'ver'} compra={selecionada} setores={setores}
+      aoFechar={() => setModo(null)} aoSalvar={() => { setModo(null); recarregar(); }} />
+  </div>;
 }
 
-// -----------------------------------------------------------------------------
+function ModalCompra(props: { aberto: boolean; modo: 'ver' | 'editar' | 'novo'; compra: Compra | null; setores: Setor[]; aoFechar: () => void; aoSalvar: () => void }) {
+  const chave = `${props.modo}-${props.compra?.id ?? 0}-${props.aberto}`;
+  return <ModalCompraConteudo key={chave} {...props} />;
+}
 
-function ModalNovaCompra({
-  aberto,
-  setores,
-  contratos,
-  aoFechar,
-  aoSalvar,
-}: {
-  aberto: boolean;
-  setores: Setor[];
-  contratos: Contrato[];
-  aoFechar: () => void;
-  aoSalvar: () => void;
+function ModalCompraConteudo({ aberto, modo, compra, setores, aoFechar, aoSalvar }: {
+  aberto: boolean; modo: 'ver' | 'editar' | 'novo'; compra: Compra | null; setores: Setor[]; aoFechar: () => void; aoSalvar: () => void;
 }) {
-  const vazio = {
-    item_comprado: '',
-    quantidade: '1',
-    valor_total: '',
-    data_compra: hojeISO(),
-    id_setor_destino: '',
-    id_contrato_origem: '',
-  };
-  const [form, setForm] = useState(vazio);
+  const [form, setForm] = useState<FormularioCompraEstado>(() => estadoCompraInicial(compra ?? undefined));
   const [erros, setErros] = useState<Record<string, string>>({});
   const [falha, setFalha] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const somenteLeitura = modo === 'ver';
 
-  const mudar = (campo: keyof typeof vazio) => (valor: string) =>
-    setForm((f) => ({ ...f, [campo]: valor }));
-
-  async function enviar() {
-    const e: Record<string, string> = {};
-    if (!form.item_comprado.trim()) e.item_comprado = 'Diga o que foi comprado.';
-    if (!(Number(form.quantidade) > 0)) e.quantidade = 'A quantidade precisa ser pelo menos 1.';
-    if (!(paraNumero(form.valor_total) > 0)) e.valor_total = 'Informe o valor pago.';
-    if (!form.data_compra) e.data_compra = 'Informe a data da compra.';
-    setErros(e);
-    if (Object.keys(e).length) return;
-
-    setSalvando(true);
-    setFalha(null);
+  async function salvar() {
+    const encontrados = validarFormularioCompra(form); setErros(encontrados);
+    if (Object.keys(encontrados).length) return;
+    setSalvando(true); setFalha(null);
     try {
-      await api.aquisicoes.criar({
-        item_comprado: form.item_comprado.trim(),
-        quantidade: Number(form.quantidade),
-        valor_total: paraNumero(form.valor_total),
-        data_compra: form.data_compra,
-        id_setor_destino: form.id_setor_destino ? Number(form.id_setor_destino) : null,
-        id_contrato_origem: form.id_contrato_origem ? Number(form.id_contrato_origem) : null,
-      });
-      setForm(vazio);
+      const dados = dadosDoFormulario(form);
+      if (modo === 'editar' && compra) await api.compras.alterar(compra.id, dados); else await api.compras.criar(dados);
       aoSalvar();
-    } catch (err) {
-      setFalha(err instanceof ErroDaApi ? err.message : 'Não foi possível registrar a compra.');
-    } finally {
-      setSalvando(false);
-    }
+    } catch (e) { setFalha(e instanceof ErroDaApi ? e.message : 'Não foi possível salvar a compra.'); }
+    finally { setSalvando(false); }
   }
 
-  return (
-    <Modal
-      aberto={aberto}
-      titulo="Registrar uma compra"
-      descricao="Anote o que foi adquirido e para qual setor foi entregue."
-      aoFechar={aoFechar}
-      rodape={
-        <>
-          <Botao aparencia="neutro" onClick={aoFechar}>
-            Cancelar
-          </Botao>
-          <Botao aparencia="primario" onClick={enviar} carregando={salvando}>
-            Salvar compra
-          </Botao>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        {falha && <AvisoErro mensagem={falha} />}
-        <CampoTexto
-          rotulo="O que foi comprado?"
-          obrigatorio
-          valor={form.item_comprado}
-          aoMudar={mudar('item_comprado')}
-          erro={erros.item_comprado}
-          placeholder="Ex.: Colete balístico nível II-A"
-        />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <CampoTexto
-            rotulo="Quantidade"
-            obrigatorio
-            tipo="number"
-            min={1}
-            valor={form.quantidade}
-            aoMudar={mudar('quantidade')}
-            erro={erros.quantidade}
-          />
-          <CampoDinheiro
-            rotulo="Valor total"
-            obrigatorio
-            valor={form.valor_total}
-            aoMudar={mudar('valor_total')}
-            erro={erros.valor_total}
-            ajuda="Some tudo: é o valor da compra inteira."
-          />
-          <CampoTexto
-            rotulo="Data da compra"
-            obrigatorio
-            tipo="date"
-            valor={form.data_compra}
-            aoMudar={mudar('data_compra')}
-            erro={erros.data_compra}
-          />
-          <CampoLista
-            rotulo="Setor que recebeu"
-            valor={form.id_setor_destino}
-            aoMudar={mudar('id_setor_destino')}
-            vazio="Não informado"
-            opcoes={opcoesDeSetor(setores)}
-          />
-        </div>
-        <CampoLista
-          rotulo="Veio de algum contrato?"
-          valor={form.id_contrato_origem}
-          aoMudar={mudar('id_contrato_origem')}
-          vazio="Compra avulsa (sem contrato)"
-          ajuda="Se a compra foi feita dentro de um contrato, escolha qual."
-          opcoes={contratos.map((c) => ({
-            valor: c.id,
-            texto: `${c.numero_contrato} — ${c.fornecedor}`,
-          }))}
-        />
-      </div>
-    </Modal>
-  );
+  return <Modal aberto={aberto} largura="grande" titulo={somenteLeitura ? `Empenho ${compra?.numero_empenho ?? ''}` : modo === 'editar' ? 'Editar compra' : 'Nova compra'}
+    descricao="Uma compra representa um empenho e pode conter vários itens." aoFechar={aoFechar}
+    rodape={<><Botao aparencia="neutro" onClick={aoFechar}>{somenteLeitura ? 'Fechar' : 'Cancelar'}</Botao>
+      {!somenteLeitura && <Botao aparencia="primario" onClick={salvar} carregando={salvando}>Salvar compra</Botao>}</>}>
+    {falha && <div className="mb-4"><AvisoErro mensagem={falha} /></div>}
+    {somenteLeitura ? <Detalhes compra={compra} /> : <FormularioCompra form={form} aoMudar={setForm} setores={setores} erros={erros} />}
+  </Modal>;
+}
+
+function Detalhes({ compra }: { compra: Compra | null }) {
+  if (!compra) return null;
+  return <div className="space-y-5 text-sm">
+    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {[['Empenho', compra.numero_empenho ?? 'Não informado (registro histórico)'], ['Processo', compra.numero_processo ?? 'Não informado'], ['Data', dataBR(compra.data_compra)],
+        ['Setor responsável', compra.setor_nome ?? '—'], ['Fornecedor', compra.fornecedor_nome ?? 'Não informado'], ['CNPJ/CPF', compra.fornecedor_documento ?? '—']].map(([r, v]) =>
+        <div key={r}><dt className="font-semibold text-slate-500">{r}</dt><dd className="mt-1 text-slate-900">{v}</dd></div>)}
+    </dl>
+    <div className="space-y-2"><h3 className="font-bold text-slate-900">Itens</h3>
+      {compra.itens?.map((item, i) => <div key={item.id ?? i} className="rounded-lg border border-slate-200 p-3">
+        <p className="font-semibold text-slate-900">{i + 1}. {item.descricao}</p>
+        <p className="mt-1 text-slate-600">{item.codigo ? `Código ${item.codigo} · ` : ''}{item.quantidade} {item.unidade ?? ''} × {moeda(item.valor_unitario)} = <strong>{moeda(item.valor_total)}</strong></p>
+      </div>)}
+    </div>
+    <p className="rounded-lg bg-slate-900 px-4 py-3 text-right text-white">Total: <strong className="ml-2 text-lg">{moeda(compra.valor_total)}</strong></p>
+  </div>;
 }

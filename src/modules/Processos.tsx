@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, FileSpreadsheet, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, FileSpreadsheet, FileUp, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
@@ -27,6 +27,14 @@ import { SelecaoNaLinha, TextoEditavel } from '../components/ui/CelulaEditavel';
 import { tomDoPrazoTarefa } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha } from '../components/ui/Estados';
 import { ETAPAS_DO_QUADRO, MODALIDADES, PRIORIDADES } from '../lib/types';
+import { processarNotaEmpenho } from '../lib/notaEmpenho';
+import {
+  FormularioCompra,
+  dadosDoFormulario,
+  estadoCompraInicial,
+  validarFormularioCompra,
+  type FormularioCompraEstado,
+} from '../components/compras/FormularioCompra';
 import type { Etapa, EtapaAberta, Modalidade, Prioridade, Processo, Setor, Usuario } from '../lib/types';
 
 /** As faixas da planilha, na ordem em que o processo caminha. */
@@ -68,6 +76,7 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
   const [emEdicao, setEmEdicao] = useState<Processo | null>(null);
   const [falhaAoSalvar, setFalhaAoSalvar] = useState<string | null>(null);
   const [concluido, setConcluido] = useState<string | null>(null);
+  const [paraConcluir, setParaConcluir] = useState<Processo | null>(null);
   const [apagado, setApagado] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [responsavelFiltro, setResponsavelFiltro] = useState('');
@@ -391,6 +400,7 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
                           processo={p}
                           usuarios={usuarios}
                           aoAjustar={ajustar}
+                          aoConcluir={() => setParaConcluir(p)}
                           aoEditar={() => abrirEdicao(p)}
                         />
                       ))
@@ -423,6 +433,17 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
           setApagado(removido.objeto);
         }}
       />
+      <ModalConclusao
+        processo={paraConcluir}
+        setores={setores}
+        aoFechar={() => setParaConcluir(null)}
+        aoConcluir={() => {
+          if (!paraConcluir) return;
+          setLista(processos.filter((p) => p.id !== paraConcluir.id));
+          setConcluido(paraConcluir.objeto);
+          setParaConcluir(null);
+        }}
+      />
     </div>
   );
 }
@@ -435,11 +456,13 @@ function LinhaProcesso({
   processo,
   usuarios,
   aoAjustar,
+  aoConcluir,
   aoEditar,
 }: {
   processo: Processo;
   usuarios: Usuario[];
   aoAjustar: (p: Processo, m: Partial<Processo>) => void;
+  aoConcluir: () => void;
   aoEditar: () => void;
 }) {
   const podeEditar = usePodeEditar();
@@ -589,7 +612,8 @@ function LinhaProcesso({
           value=""
           aria-label={`Mover ${processo.objeto} para outra fase`}
           onChange={(e) => {
-            if (e.target.value) aoAjustar(processo, { etapa: e.target.value as Etapa });
+            if (e.target.value === 'Concluído') aoConcluir();
+            else if (e.target.value) aoAjustar(processo, { etapa: e.target.value as Etapa });
           }}
           className="w-full cursor-pointer rounded border border-slate-300 bg-white px-1.5 py-1
             text-[11.5px] font-semibold text-slate-700 hover:bg-slate-50
@@ -622,6 +646,100 @@ function LinhaProcesso({
       </td>
     </tr>
   );
+}
+
+// -----------------------------------------------------------------------------
+// Conclusão com Nota de Empenho
+// -----------------------------------------------------------------------------
+
+function ModalConclusao({ processo, setores, aoFechar, aoConcluir }: {
+  processo: Processo | null;
+  setores: Setor[];
+  aoFechar: () => void;
+  aoConcluir: () => void;
+}) {
+  const [arquivo, setArquivo] = useState<File | null>(null);
+  const [form, setForm] = useState<FormularioCompraEstado>(() => estadoCompraInicial());
+  const [hash, setHash] = useState('');
+  const [avisos, setAvisos] = useState<string[]>([]);
+  const [erros, setErros] = useState<Record<string, string>>({});
+  const [falha, setFalha] = useState<string | null>(null);
+  const [processando, setProcessando] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const [conferindo, setConferindo] = useState(false);
+  const chave = processo?.id ?? 0;
+  const [chaveAnterior, setChaveAnterior] = useState(chave);
+  if (chaveAnterior !== chave) {
+    setChaveAnterior(chave); setArquivo(null); setForm(estadoCompraInicial()); setHash('');
+    setAvisos([]); setErros({}); setFalha(null); setConferindo(false);
+  }
+
+  async function processar() {
+    if (!arquivo) { setFalha('Selecione a Nota de Empenho em PDF.'); return; }
+    setProcessando(true); setFalha(null);
+    try {
+      const resultado = await processarNotaEmpenho(arquivo);
+      setForm(estadoCompraInicial(resultado.dados));
+      setHash(resultado.hash);
+      setAvisos(resultado.dados.avisos);
+      setConferindo(true);
+    } catch (e) {
+      setFalha(e instanceof Error ? e.message : 'Não foi possível processar o PDF.');
+    } finally { setProcessando(false); }
+  }
+
+  const divergente = Boolean(
+    conferindo && processo?.sei && form.numero_processo.trim() &&
+    processo.sei.trim().toLocaleUpperCase('pt-BR') !== form.numero_processo.trim().toLocaleUpperCase('pt-BR'),
+  );
+
+  async function confirmar() {
+    if (!processo || !arquivo) return;
+    const encontrados = validarFormularioCompra(form);
+    if (divergente) encontrados.numero_processo = 'O número deve corresponder ao processo atual.';
+    setErros(encontrados);
+    if (Object.keys(encontrados).length) return;
+    setConfirmando(true); setFalha(null);
+    try {
+      await api.processos.concluirComCompra(processo.id, {
+        ...dadosDoFormulario(form), nota_nome: arquivo.name, nota_hash: hash,
+      });
+      aoConcluir();
+    } catch (e) {
+      setFalha(e instanceof ErroDaApi ? e.message : 'Não foi possível concluir o processo. Nenhum dado foi alterado.');
+    } finally { setConfirmando(false); }
+  }
+
+  return <Modal aberto={processo !== null} largura="grande" titulo="Concluir processo"
+    descricao="A compra e seus itens serão criados antes de o processo ser concluído." aoFechar={aoFechar}
+    rodape={<><Botao aparencia="neutro" onClick={aoFechar}>Cancelar</Botao>
+      {conferindo ? <Botao aparencia="primario" onClick={confirmar} carregando={confirmando}>Confirmar e concluir processo</Botao> :
+        <Botao aparencia="primario" onClick={processar} carregando={processando} disabled={!arquivo}>Processar Nota de Empenho</Botao>}
+    </>}>
+    <div className="space-y-5">
+      {falha && <AvisoErro mensagem={falha} />}
+      {!conferindo ? <div>
+        <p className="mb-4 text-sm text-slate-700">Anexe a Nota de Empenho para concluir <strong>{processo?.objeto}</strong>.</p>
+        <label className="flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-300 p-8 text-center hover:border-marca-400 hover:bg-marca-50/40">
+          <FileUp className="size-8 text-marca-600" />
+          <span className="font-semibold text-slate-800">{arquivo?.name ?? 'Selecionar PDF'}</span>
+          <span className="text-xs text-slate-500">PDF com texto nativo, até 5 MB. OCR não é realizado.</span>
+          <input type="file" accept="application/pdf,.pdf" className="sr-only"
+            onChange={(e) => { setArquivo(e.target.files?.[0] ?? null); setFalha(null); }} />
+        </label>
+      </div> : <>
+        {avisos.length > 0 && <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-bold">Alguns dados não puderam ser confirmados automaticamente.</p>
+          <p className="mt-1">Revise: {avisos.join(', ')}.</p>
+        </div>}
+        {divergente && <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900">
+          <p className="font-bold">ATENÇÃO — o processo da Nota não corresponde ao processo atual.</p>
+          <p className="mt-1">Processo atual: <strong>{processo?.sei ?? 'não informado'}</strong><br />Processo identificado: <strong>{form.numero_processo || 'não identificado'}</strong></p>
+        </div>}
+        <FormularioCompra form={form} aoMudar={setForm} setores={setores} erros={erros} processoBloqueado />
+      </>}
+    </div>
+  </Modal>;
 }
 
 // -----------------------------------------------------------------------------
@@ -952,9 +1070,9 @@ export function ModalProcesso({
             aoMudar={mudar('data_limite')}
             ajuda="Aparece em vermelho quando o prazo estoura."
           />
-          {/* Ao editar, 'Concluído' entra na lista: sem essa opção, abrir um
-              processo já concluído e salvar o devolveria ao quadro sem querer.
-              De quebra, dá para concluir e reabrir por aqui também. */}
+          {/* "Concluído" só permanece disponível ao editar um registro já
+              encerrado. Processos abertos usam obrigatoriamente o fluxo da
+              Nota de Empenho na planilha. */}
           <CampoLista
             rotulo={processo ? 'Fase' : 'Começa em qual fase?'}
             valor={form.etapa}
@@ -962,7 +1080,9 @@ export function ModalProcesso({
             vazio="Selecione"
             opcoes={[
               ...ETAPAS.map((e) => ({ valor: e.chave as string, texto: e.faixa })),
-              ...(processo ? [{ valor: 'Concluído', texto: '✓ Concluído' }] : []),
+              ...(processo?.etapa === 'Concluído'
+                ? [{ valor: 'Concluído', texto: '✓ Concluído' }]
+                : []),
             ]}
             ajuda={
               processo?.etapa === 'Concluído'

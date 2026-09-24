@@ -5,6 +5,8 @@
 
 import type {
   Aquisicao,
+  Compra,
+  DadosCompra,
   Contrato,
   DashboardData,
   Emenda,
@@ -199,6 +201,17 @@ export const api = {
     alterar: (id: number, d: Partial<Processo>) =>
       pedir<Processo>(`/processos/${id}`, { method: 'PUT', ...corpo(d) }),
     excluir: (id: number) => pedir<void>(`/processos/${id}`, { method: 'DELETE' }),
+    concluirComCompra: (id: number, d: DadosCompra) =>
+      pedir<Compra>(`/processos/${id}/concluir-compra`, { method: 'POST', ...corpo(d) }),
+  },
+
+  compras: {
+    listar: (busca = '') => pedir<Compra[]>(`/compras?busca=${encodeURIComponent(busca)}`),
+    obter: (id: number) => pedir<Compra>(`/compras/${id}`),
+    criar: (d: DadosCompra) => pedir<Compra>('/compras', { method: 'POST', ...corpo(d) }),
+    alterar: (id: number, d: DadosCompra) =>
+      pedir<Compra>(`/compras/${id}`, { method: 'PUT', ...corpo(d) }),
+    excluir: (id: number) => pedir<void>(`/compras/${id}`, { method: 'DELETE' }),
   },
 
   aquisicoes: {

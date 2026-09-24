@@ -14,6 +14,8 @@
 -- =============================================================================
 
 DROP TABLE IF EXISTS aquisicoes;
+DROP TABLE IF EXISTS compra_itens;
+DROP TABLE IF EXISTS compras;
 DROP TABLE IF EXISTS processos;
 DROP TABLE IF EXISTS pagamentos_contrato;
 DROP TABLE IF EXISTS previsoes_contrato;
@@ -323,3 +325,50 @@ CREATE TABLE aquisicoes (
 CREATE INDEX idx_aquisicoes_setor    ON aquisicoes(id_setor_destino);
 CREATE INDEX idx_aquisicoes_contrato ON aquisicoes(id_contrato_origem);
 CREATE INDEX idx_aquisicoes_data     ON aquisicoes(data_compra);
+
+-- -----------------------------------------------------------------------------
+-- COMPRAS / EMPENHOS — uma linha por empenho; seus itens ficam normalizados.
+-- A API recalcula os totais e grava Compra + itens em uma única transação.
+-- -----------------------------------------------------------------------------
+CREATE TABLE compras (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  numero_empenho         TEXT COLLATE NOCASE UNIQUE,
+  numero_processo        TEXT,
+  data_compra            TEXT NOT NULL,
+  fornecedor_nome        TEXT,
+  fornecedor_documento   TEXT,
+  id_setor_responsavel   INTEGER REFERENCES setores(id) ON DELETE RESTRICT,
+  id_processo            INTEGER REFERENCES processos(id) ON DELETE RESTRICT,
+  id_aquisicao_legada    INTEGER UNIQUE REFERENCES aquisicoes(id) ON DELETE SET NULL,
+  valor_total            REAL NOT NULL CHECK (valor_total >= 0),
+  nota_nome              TEXT,
+  nota_hash              TEXT,
+  criado_em              TEXT NOT NULL DEFAULT (datetime('now')),
+  atualizado_em          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_compras_processo        ON compras(id_processo);
+CREATE INDEX idx_compras_numero_processo ON compras(numero_processo);
+CREATE INDEX idx_compras_setor           ON compras(id_setor_responsavel);
+CREATE INDEX idx_compras_data            ON compras(data_compra);
+CREATE UNIQUE INDEX idx_compras_nota_hash ON compras(nota_hash) WHERE nota_hash IS NOT NULL;
+
+CREATE TABLE compra_itens (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  id_compra       INTEGER NOT NULL REFERENCES compras(id) ON DELETE CASCADE,
+  codigo          TEXT,
+  descricao       TEXT NOT NULL,
+  unidade         TEXT,
+  quantidade      REAL NOT NULL CHECK (quantidade > 0),
+  valor_unitario  REAL NOT NULL CHECK (valor_unitario >= 0),
+  valor_total     REAL NOT NULL CHECK (valor_total >= 0),
+  ordem           INTEGER NOT NULL DEFAULT 0,
+  criado_em       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_compra_itens_compra ON compra_itens(id_compra, ordem, id);
+
+CREATE TRIGGER trg_compras_atualizado
+AFTER UPDATE ON compras
+FOR EACH ROW
+BEGIN
+  UPDATE compras SET atualizado_em = datetime('now') WHERE id = OLD.id;
+END;

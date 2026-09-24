@@ -274,6 +274,52 @@ export interface Aquisicao {
   contrato_numero?: string | null;
 }
 
+export interface CompraItem {
+  id?: number;
+  id_compra?: number;
+  codigo: string | null;
+  descricao: string;
+  unidade: string | null;
+  quantidade: number;
+  valor_unitario: number;
+  valor_total: number;
+  ordem?: number;
+}
+
+/** Uma Compra representa um empenho e contém um ou mais itens. */
+export interface Compra {
+  id: number;
+  numero_empenho: string | null;
+  numero_processo: string | null;
+  data_compra: string;
+  fornecedor_nome: string | null;
+  fornecedor_documento: string | null;
+  id_setor_responsavel: number | null;
+  id_processo: number | null;
+  id_aquisicao_legada?: number | null;
+  valor_total: number;
+  nota_nome?: string | null;
+  nota_hash?: string | null;
+  quantidade_itens?: number;
+  itens?: CompraItem[];
+  setor_nome?: string;
+  setor_sigla?: string;
+  processo_objeto?: string | null;
+}
+
+export interface DadosCompra {
+  numero_empenho: string;
+  numero_processo: string;
+  data_compra: string;
+  fornecedor_nome: string;
+  fornecedor_documento: string | null;
+  id_setor_responsavel: number;
+  valor_total: number;
+  nota_nome?: string | null;
+  nota_hash?: string | null;
+  itens: CompraItem[];
+}
+
 /** Payload consolidado que alimenta o Dashboard em uma única requisição. */
 export interface DashboardData {
   ano: number;

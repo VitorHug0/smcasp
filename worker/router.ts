@@ -28,6 +28,7 @@ import {
 import { RECURSOS } from './recursos';
 import { MENSAGENS, sessaoDaRequisicao, tratarCadastro, tratarSessao } from './auth';
 import { tratarAdminUsuarios } from './admin';
+import { concluirProcessoComCompra, tratarCompras } from './compras';
 import type { Contrato, DashboardData } from '../src/lib/types';
 
 /** Métodos que mexem nos dados. GET e HEAD são leitura e passam para todo mundo. */
@@ -89,6 +90,16 @@ export async function tratarApi(request: Request, env: Env): Promise<Response> {
     if (partes[0] === 'dashboard') {
       if (request.method !== 'GET') return erro('Método não permitido.', 405);
       return json(await montarDashboard(env, url.searchParams.get('ano')));
+    }
+
+    if (partes[0] === 'compras') {
+      return await tratarCompras(request, env, partes.slice(1));
+    }
+
+    if (partes[0] === 'processos' && partes.length === 3 && partes[2] === 'concluir-compra') {
+      const id = Number(partes[1]);
+      if (!Number.isInteger(id) || id <= 0) return erro('Identificador inválido.', 400);
+      return await concluirProcessoComCompra(request, env, id);
     }
 
     const recurso = RECURSOS[partes[0]];
@@ -267,6 +278,9 @@ async function obter(env: Env, nome: string, id: number): Promise<Response> {
 async function criar(env: Env, nome: string, request: Request): Promise<Response> {
   const recurso = RECURSOS[nome];
   const corpo = await lerCorpo(request);
+  if (nome === 'processos' && corpo.etapa === 'Concluído') {
+    throw new ErroDeValidacao('Conclua o processo anexando e confirmando a Nota de Empenho.');
+  }
   const dados = validarCompleto(recurso.campos, corpo);
   validarRegras(nome, dados);
   ajustarDataDeConclusao(nome, dados);
@@ -294,6 +308,13 @@ async function alterar(
 ): Promise<Response> {
   const recurso = RECURSOS[nome];
   const corpo = await lerCorpo(request);
+  if (nome === 'processos' && corpo.etapa === 'Concluído') {
+    const atual = await env.DB.prepare('SELECT etapa FROM processos WHERE id = ?').bind(id)
+      .first<{ etapa: string }>();
+    if (atual?.etapa !== 'Concluído') {
+      throw new ErroDeValidacao('Conclua o processo anexando e confirmando a Nota de Empenho.');
+    }
+  }
   const dados = parcial
     ? validarParcial(recurso.campos, corpo)
     : validarCompleto(recurso.campos, corpo);
@@ -394,7 +415,7 @@ async function montarDashboard(env: Env, anoParam: string | null): Promise<Dashb
         FROM processos WHERE etapa <> 'Concluído'`),
       env.DB.prepare(`
         SELECT COALESCE(SUM(valor_total), 0) AS total, COUNT(*) AS quantidade
-        FROM aquisicoes WHERE strftime('%Y', data_compra) = ?`).bind(String(ano)),
+          FROM compras WHERE strftime('%Y', data_compra) = ?`).bind(String(ano)),
       // Emendas agrupadas pelo objetivo — é como a planilha da Câmara as
       // organiza, e é a pergunta que a Coordenadoria faz: quanto do dinheiro
       // é para monitoramento, quanto para munição, quanto para drones.

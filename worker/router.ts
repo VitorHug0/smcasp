@@ -93,7 +93,7 @@ export async function tratarApi(request: Request, env: Env): Promise<Response> {
     }
 
     if (partes[0] === 'compras') {
-      return await tratarCompras(request, env, partes.slice(1));
+      return await tratarCompras(request, env, partes.slice(1), usuario.role === 'SUPER_ADMIN');
     }
 
     if (partes[0] === 'processos' && partes.length === 3 && partes[2] === 'concluir-compra') {

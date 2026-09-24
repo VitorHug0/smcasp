@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Eye, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
-import { usePodeEditar } from '../lib/permissoes';
+import { useAcesso } from '../lib/permissoes';
 import { setoresPorGrupo, rotuloDoSetor } from '../lib/setores';
 import { dataBR, moeda, numero } from '../lib/formato';
 import { Botao } from '../components/ui/Botao';
@@ -18,7 +18,7 @@ import type { Compra, Contrato, Setor } from '../lib/types';
 interface Props { setores: Setor[]; contratos: Contrato[] }
 
 export function Compras({ setores }: Props) {
-  const podeEditar = usePodeEditar();
+  const { podeEditar, ehAdmin } = useAcesso();
   const { dados, carregando, erro, recarregar } = useDados<Compra[]>(() => api.compras.listar());
   const [busca, setBusca] = useState('');
   const [setorFiltro, setSetorFiltro] = useState('');
@@ -44,7 +44,10 @@ export function Compras({ setores }: Props) {
   }
 
   async function excluir(compra: Compra) {
-    if (!confirm(`Excluir ${compra.numero_empenho ? `a compra do Empenho ${compra.numero_empenho}` : 'este registro histórico'}?`)) return;
+    const avisoProcesso = compra.id_processo
+      ? '\n\nO processo vinculado será reaberto na etapa AUDESP/PNCP.'
+      : '';
+    if (!confirm(`Excluir ${compra.numero_empenho ? `a compra do Empenho ${compra.numero_empenho}` : 'este registro histórico'}? Esta ação não pode ser desfeita.${avisoProcesso}`)) return;
     try { await api.compras.excluir(compra.id); recarregar(); }
     catch (e) { alert(e instanceof ErroDaApi ? e.message : 'Não foi possível excluir.'); }
   }
@@ -92,8 +95,8 @@ export function Compras({ setores }: Props) {
             <td className="px-4 py-3 font-semibold tabular-nums">{moeda(compra.valor_total)}</td>
             <td className="whitespace-nowrap px-4 py-3">
               <button type="button" onClick={() => abrir(compra, 'ver')} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Visualizar compra"><Eye className="size-4" /></button>
-              {podeEditar && <><button type="button" onClick={() => abrir(compra, 'editar')} className="rounded-lg p-2 text-slate-500 hover:bg-marca-50 hover:text-marca-700" aria-label="Editar compra"><Pencil className="size-4" /></button>
-                {!compra.id_processo && <button type="button" onClick={() => excluir(compra)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Excluir compra"><Trash2 className="size-4" /></button>}</>}
+              {podeEditar && <button type="button" onClick={() => abrir(compra, 'editar')} className="rounded-lg p-2 text-slate-500 hover:bg-marca-50 hover:text-marca-700" aria-label="Editar compra"><Pencil className="size-4" /></button>}
+              {ehAdmin && <button type="button" onClick={() => excluir(compra)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Excluir compra"><Trash2 className="size-4" /></button>}
             </td>
           </tr>)}</tbody>
         </table>

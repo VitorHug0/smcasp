@@ -264,7 +264,12 @@ export async function concluirProcessoComCompra(
   return salvo ? obterCompra(env, salvo.id) : erro('Não foi possível concluir o processo.', 500);
 }
 
-export async function tratarCompras(request: Request, env: Env, partes: string[]): Promise<Response> {
+export async function tratarCompras(
+  request: Request,
+  env: Env,
+  partes: string[],
+  ehAdmin: boolean,
+): Promise<Response> {
   if (partes.length === 0) {
     if (request.method === 'GET') {
       const busca = new URL(request.url).searchParams.get('busca')?.trim() ?? '';
@@ -286,11 +291,17 @@ export async function tratarCompras(request: Request, env: Env, partes: string[]
   if (request.method === 'GET') return obterCompra(env, id);
   if (request.method === 'PUT') return editar(env, id, await lerCorpo(request));
   if (request.method === 'DELETE') {
+    if (!ehAdmin) return erro('Somente o Administrador Geral pode excluir compras.', 403);
     const vinculada = await env.DB.prepare('SELECT id_processo FROM compras WHERE id = ?').bind(id)
       .first<{ id_processo: number | null }>();
     if (!vinculada) return erro('Compra não encontrada.', 404);
     if (vinculada.id_processo) {
-      return erro('Esta compra foi criada ao concluir um processo e não pode ser excluída.', 409);
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE processos SET etapa = 'AUDESP/PNCP', data_conclusao = NULL WHERE id = ?`)
+          .bind(vinculada.id_processo),
+        env.DB.prepare('DELETE FROM compras WHERE id = ?').bind(id),
+      ]);
+      return json({ ok: true, processo_reaberto: true });
     }
     const resultado = await env.DB.prepare('DELETE FROM compras WHERE id = ?').bind(id).run();
     return resultado.meta.changes ? json({ ok: true }) : erro('Compra não encontrada.', 404);

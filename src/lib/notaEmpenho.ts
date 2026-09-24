@@ -22,7 +22,7 @@ function desescaparPdf(valor: string): string {
     .replace(/\\\r?\n/g, '');
 }
 
-function textosDeOperadores(conteudo: string): string[] {
+function stringsDeOperadores(conteudo: string): string[] {
   const saida: string[] = [];
   const re = /(\((?:\\.|[^\\)])*\)|<([0-9A-Fa-f\s]+)>)(?=\s*(?:Tj|'|"))/g;
   let encontro: RegExpExecArray | null;
@@ -43,6 +43,38 @@ function textosDeOperadores(conteudo: string): string[] {
     if (partes.length) saida.push(partes.join(''));
   }
   return saida.filter((s) => s.trim());
+}
+
+/**
+ * Reordena os blocos de texto pela posição em que aparecem na página. Algumas
+ * notas da Prefeitura gravam os campos no stream fora da ordem visual; sem as
+ * coordenadas, o número do empenho pode aparecer depois da data e os valores
+ * dos itens antes de sua descrição.
+ */
+function textosDeOperadores(conteudo: string): string[] {
+  const blocos = [...conteudo.matchAll(/BT([\s\S]*?)ET/g)];
+  if (!blocos.length) return stringsDeOperadores(conteudo);
+
+  const posicionados = blocos.flatMap((encontro, ordem) => {
+    const bloco = encontro[1];
+    const textos = stringsDeOperadores(bloco);
+    if (!textos.length) return [];
+
+    const deslocamentos = [...bloco.matchAll(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Td\b/g)];
+    const matrizes = [...bloco.matchAll(
+      /-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Tm\b/g,
+    )];
+    const posicao = deslocamentos.at(-1) ?? matrizes.at(-1);
+    const x = posicao ? Number(posicao[1]) : 0;
+    const y = posicao ? Number(posicao[2]) : -ordem;
+    return textos.map((texto) => ({ texto, x, y, ordem }));
+  });
+
+  posicionados.sort((a, b) => {
+    if (Math.abs(a.y - b.y) <= 1) return a.x === b.x ? a.ordem - b.ordem : a.x - b.x;
+    return b.y - a.y;
+  });
+  return posicionados.map((item) => item.texto);
 }
 
 async function inflar(bytes: Uint8Array): Promise<string | null> {
@@ -119,18 +151,120 @@ function capturar(texto: string, rotulo: string, fim: string): string {
   return (m?.[1] ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function trechoEntre(texto: string, inicio: RegExp, fim: RegExp): string {
+  const comeco = texto.search(inicio);
+  if (comeco < 0) return '';
+  const restante = texto.slice(comeco);
+  const terminoRelativo = restante.search(fim);
+  return terminoRelativo > 0 ? restante.slice(0, terminoRelativo) : restante;
+}
+
+function itensDaTabela(texto: string): CompraItem[] {
+  const secao = trechoEntre(
+    texto,
+    /Especifica[^\n]*es/i,
+    /Valor\s+Empenho|Hist.rico\s+do\s+Empenho|Fonte:/i,
+  );
+  if (!secao) return [];
+
+  const linhas = secao.split('\n').map((linha) => linha.trim()).filter(Boolean);
+  const fimCabecalho = linhas.findIndex((linha) => /^Valor\s+Total$/i.test(linha));
+  if (fimCabecalho < 0) return [];
+
+  const dados = linhas.slice(fimCabecalho + 1);
+  const itens: CompraItem[] = [];
+  let i = 0;
+  const iniciaItem = (indice: number) =>
+    /^\d+$/.test(dados[indice] ?? '') && /^\d{3,}$/.test(dados[indice + 1] ?? '');
+
+  while (i < dados.length) {
+    if (/^Total\s*:?$/i.test(dados[i])) break;
+    if (!iniciaItem(i)) {
+      i++;
+      continue;
+    }
+
+    const codigo = dados[i + 1];
+    const inicioDescricao = i + 2;
+    let unidadeIndice = inicioDescricao;
+    while (unidadeIndice < dados.length) {
+      const unidade = dados[unidadeIndice];
+      const quantidade = dados[unidadeIndice + 1] ?? '';
+      const unitario = dados[unidadeIndice + 2] ?? '';
+      const total = dados[unidadeIndice + 3] ?? '';
+      if (
+        /^[A-Z]{1,8}$/i.test(unidade) &&
+        /^\d+(?:[.,]\d+)?$/.test(quantidade) &&
+        /^\d[\d.]*,\d{2,4}$/.test(unitario) &&
+        /^\d[\d.]*,\d{2}$/.test(total)
+      ) break;
+      unidadeIndice++;
+    }
+    if (unidadeIndice >= dados.length - 3) {
+      i++;
+      continue;
+    }
+
+    const descricao = dados.slice(inicioDescricao, unidadeIndice);
+    const unidade = dados[unidadeIndice];
+    const quantidade = valorBR(dados[unidadeIndice + 1]);
+    const valorUnitario = valorBR(dados[unidadeIndice + 2]);
+    const valorTotal = valorBR(dados[unidadeIndice + 3]);
+    i = unidadeIndice + 4;
+
+    // Neste modelo a continuação da descrição é impressa abaixo dos valores,
+    // antes da próxima linha numerada da tabela.
+    while (i < dados.length && !iniciaItem(i) && !/^Total\s*:?$/i.test(dados[i])) {
+      descricao.push(dados[i]);
+      i++;
+    }
+
+    itens.push({
+      codigo,
+      descricao: descricao.join(' ').replace(/\s+/g, ' ').trim(),
+      unidade,
+      quantidade,
+      valor_unitario: valorUnitario,
+      valor_total: valorTotal || Math.round(quantidade * valorUnitario * 100) / 100,
+    });
+  }
+  return itens;
+}
+
 /** Interpreta o texto sem inventar campos ausentes. */
 export function interpretarNotaEmpenho(textoOriginal: string): NotaEmpenhoExtraida {
   const texto = textoOriginal.replace(/\r/g, '\n').replace(/\n{2,}/g, '\n');
   const rotulosGerais = 'N[ºo°.]?\\s*(?:do\\s+)?Processo|Data|Fornecedor|Credor|CNPJ|CPF|ITEM\\s*\\d+|TOTAL';
-  const numeroEmpenho = capturar(texto, 'N[ºo°.]?\\s*(?:do\\s+)?Empenho', rotulosGerais).split(' ')[0] ?? '';
-  const numeroProcesso = capturar(texto, 'N[ºo°.]?\\s*(?:do\\s+)?Processo(?:\\s+de\\s+Compra)?', 'Data|Fornecedor|Credor|CNPJ|CPF|ITEM\\s*\\d+|TOTAL').split(' ')[0] ?? '';
-  const data = dataISO(capturar(texto, 'Data', 'Fornecedor|Credor|CNPJ|CPF|ITEM\\s*\\d+|TOTAL'));
-  const fornecedor = capturar(texto, '(?:Fornecedor|Credor)', 'CNPJ|CPF|ITEM\\s*\\d+|TOTAL');
-  const documento = (texto.match(/(?:CNPJ|CPF)\s*[:.-]?\s*([\d.\/-]{11,18})/i)?.[1] ?? '').trim();
+  const dadosEmpenho = trechoEntre(texto, /Dados\s+do\s+Empenho/i, /Dados\s+do\s+Or.amento/i);
+  const dadosCredor = trechoEntre(texto, /Dados\s+do\s+Credor/i, /Especifica[^\n]*es/i);
+  const numeroEmpenho = (
+    dadosEmpenho.match(/\bE\d+\/\d{4}\b/i)?.[0] ??
+    texto.match(/\bE\d+\/\d{4}\b/i)?.[0] ??
+    capturar(texto, 'N[ºo°.]?\\s*(?:do\\s+)?Empenho', rotulosGerais).split(' ')[0] ??
+    ''
+  );
+  const numeroProcesso = (
+    dadosEmpenho.match(/\bPMC\.\d{4}\.\d{8}-\d{2}\b/i)?.[0] ??
+    texto.match(/\bPMC\.\d{4}\.\d{8}-\d{2}\b/i)?.[0] ??
+    capturar(texto, 'N[ºo°.]?\\s*(?:do\\s+)?Processo(?:\\s+de\\s+Compra)?', 'Data|Fornecedor|Credor|CNPJ|CPF|ITEM\\s*\\d+|TOTAL').split(' ')[0] ??
+    ''
+  );
+  const data = dataISO(
+    dadosEmpenho.match(/\b\d{2}\/\d{2}\/\d{4}\b/)?.[0] ??
+    texto.match(/\b\d{2}\/\d{2}\/\d{4}\b/)?.[0],
+  );
+  const fornecedor = (
+    dadosCredor.match(/Nome:\s*\n?\s*([^\n]+)/i)?.[1]?.trim() ??
+    capturar(texto, '(?:Fornecedor|Credor)', 'CNPJ|CPF|ITEM\\s*\\d+|TOTAL')
+  );
+  const documento = (
+    dadosCredor.match(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/)?.[0] ??
+    dadosCredor.match(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/)?.[0] ??
+    ''
+  );
 
   const blocos = [...texto.matchAll(/ITEM\s*\d+([\s\S]*?)(?=ITEM\s*\d+|\n\s*TOTAL\s*:|$)/gi)];
-  const itens = blocos.map((m): CompraItem => {
+  const itensRotulados = blocos.map((m): CompraItem => {
     const bloco = m[1];
     const codigo = capturar(bloco, 'C[oó]digo', 'Descri[cç][aã]o|Unidade|Quantidade|Valor\\s+unit[aá]rio|Valor\\s+total');
     const descricao = capturar(bloco, 'Descri[cç][aã]o', 'Unidade|Quantidade|Valor\\s+unit[aá]rio|Valor\\s+total');
@@ -147,6 +281,7 @@ export function interpretarNotaEmpenho(textoOriginal: string): NotaEmpenhoExtrai
       valor_total: totalInformado || Math.round(quantidade * unitario * 100) / 100,
     };
   }).filter((item) => item.descricao || item.codigo);
+  const itens = itensRotulados.length ? itensRotulados : itensDaTabela(texto);
 
   const totalDocumento = valorBR(texto.match(/(?:^|\n)\s*TOTAL\s*:\s*(?:R\$\s*)?([\d.]+,\d{2})/i)?.[1]);
   const totalItens = Math.round(itens.reduce((s, i) => s + i.valor_total, 0) * 100) / 100;

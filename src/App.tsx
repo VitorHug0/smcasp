@@ -68,12 +68,14 @@ export default function App() {
    */
   const [objetivoEmendas, setObjetivoEmendas] = useState('');
   const [buscaContratos, setBuscaContratos] = useState('');
+  const [minhasDemandasProcessos, setMinhasDemandasProcessos] = useState(false);
 
   /** Vai para uma tela levando (ou limpando) o filtro de partida. */
   const irPara = useCallback(
-    (rota: string, filtros: { objetivo?: string; busca?: string } = {}) => {
+    (rota: string, filtros: { objetivo?: string; busca?: string; minhasDemandas?: boolean } = {}) => {
       setObjetivoEmendas(filtros.objetivo ?? '');
       setBuscaContratos(filtros.busca ?? '');
+      setMinhasDemandasProcessos(filtros.minhasDemandas ?? false);
       navegar(rota);
     },
     [navegar],
@@ -254,7 +256,10 @@ export default function App() {
           telaAtual={telaAtual.chave}
           aoTrocar={(t) => {
             const destino = ITENS_MENU.find((i) => i.chave === t);
-            if (destino) navegar(destino.rota);
+            if (destino) {
+              if (destino.chave === 'processos') setMinhasDemandasProcessos(false);
+              navegar(destino.rota);
+            }
             setMenuAberto(false);
           }}
           abertoNoCelular={menuAberto}
@@ -353,6 +358,7 @@ export default function App() {
                       aoAbrirContratos: (busca) => irPara('/contratos', { busca }),
                       aoAbrirEmendas: (objetivo) => irPara('/emendas', { objetivo }),
                       aoAbrirProcessos: () => irPara('/processos'),
+                      aoAbrirMinhasDemandas: () => irPara('/processos', { minhasDemandas: true }),
                       aoAbrirCompras: () => irPara('/compras'),
                     }}
                   />
@@ -362,6 +368,9 @@ export default function App() {
                     key={versao}
                     setores={setores}
                     usuarios={usuarios}
+                    usuarioAtualId={usuario.id}
+                    somenteMinhasDemandas={minhasDemandasProcessos}
+                    aoMudarMinhasDemandas={setMinhasDemandasProcessos}
                     aoAbrirConcluidos={() => navegar('/concluidos')}
                   />
                 )}

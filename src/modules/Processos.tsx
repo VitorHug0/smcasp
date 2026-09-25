@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, FileSpreadsheet, FileUp, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, FileSpreadsheet, FileUp, Pencil, Plus, Search, Trash2, UserCheck } from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
@@ -28,7 +28,6 @@ import { tomDoPrazoTarefa } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha } from '../components/ui/Estados';
 import { DESFECHOS_PROCESSO, ETAPAS_DO_QUADRO, MODALIDADES, PRIORIDADES } from '../lib/types';
 import { processarNotaEmpenho } from '../lib/notaEmpenho';
-import { mascararProcessoSei, urlPncp, urlProcessoSei } from '../lib/linksProcesso';
 import {
   FormularioCompra,
   dadosDoFormulario,
@@ -61,11 +60,21 @@ const COR_PRIORIDADE: Record<Prioridade, string> = {
 interface Props {
   setores: Setor[];
   usuarios: Usuario[];
+  usuarioAtualId: number;
+  somenteMinhasDemandas: boolean;
+  aoMudarMinhasDemandas: (ativo: boolean) => void;
   /** Chamado quando o usuário quer ver o processo que acabou de concluir. */
   aoAbrirConcluidos: () => void;
 }
 
-export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
+export function Processos({
+  setores,
+  usuarios,
+  usuarioAtualId,
+  somenteMinhasDemandas,
+  aoMudarMinhasDemandas,
+  aoAbrirConcluidos,
+}: Props) {
   // Perfil de Leitor: a planilha continua inteira na tela, só não abre para
   // edição. As células cuidam disso sozinhas; aqui somem os botões.
   const podeEditar = usePodeEditar();
@@ -105,9 +114,13 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
         String(p.id_responsavel ?? '') === responsavelFiltro ||
         String(p.id_responsavel_2 ?? '') === responsavelFiltro;
       const casaPrioridade = !prioridadeFiltro || p.prioridade === prioridadeFiltro;
-      return casaBusca && casaResponsavel && casaPrioridade;
+      const casaMinhasDemandas =
+        !somenteMinhasDemandas ||
+        p.id_responsavel === usuarioAtualId ||
+        p.id_responsavel_2 === usuarioAtualId;
+      return casaBusca && casaResponsavel && casaPrioridade && casaMinhasDemandas;
     });
-  }, [processos, busca, responsavelFiltro, prioridadeFiltro]);
+  }, [processos, busca, responsavelFiltro, prioridadeFiltro, somenteMinhasDemandas, usuarioAtualId]);
 
   const porEtapa = useMemo(() => {
     const mapa = new Map<EtapaAberta, Processo[]>();
@@ -179,7 +192,7 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
   if (carregando && !lista) return <Carregando texto="Abrindo a planilha de processos…" />;
   if (erro) return <Falha mensagem={erro} aoTentarDeNovo={recarregar} />;
 
-  const filtrando = Boolean(busca || responsavelFiltro || prioridadeFiltro);
+  const filtrando = Boolean(busca || responsavelFiltro || prioridadeFiltro || somenteMinhasDemandas);
   const classeFiltro =
     'cursor-pointer rounded-lg border border-slate-300 px-3 py-2.5 text-base ' +
     'focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100';
@@ -225,6 +238,15 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
             </option>
           ))}
         </select>
+        <Botao
+          aparencia={somenteMinhasDemandas ? 'primario' : 'neutro'}
+          icone={<UserCheck className="size-4" />}
+          onClick={() => aoMudarMinhasDemandas(!somenteMinhasDemandas)}
+          aria-pressed={somenteMinhasDemandas}
+          title={somenteMinhasDemandas ? 'Mostrar todos os processos' : 'Mostrar somente processos atribuídos a mim'}
+        >
+          Minhas Demandas
+        </Botao>
         {/* Exportar é leitura: quem tem perfil de Leitor também precisa levar
             a planilha para uma reunião, então o botão não depende do perfil. */}
         <Botao
@@ -487,8 +509,7 @@ function LinhaProcesso({
         {processo.sei ? (
           <BotaoCopiar
             texto={processo.sei}
-            rotulo="Abrir consulta do processo no SEI Campinas"
-            href={urlProcessoSei(processo.sei)}
+            rotulo="Copiar o número do processo"
             className="w-full font-mono text-[11px] text-slate-700"
           />
         ) : (
@@ -552,8 +573,6 @@ function LinhaProcesso({
           valor={processo.pncp}
           monoespacado
           linhas={1}
-          href={urlPncp(processo.pncp)}
-          rotuloLink="Abrir consulta no PNCP"
           aoSalvar={(v) => aoAjustar(processo, { pncp: v })}
         />
       </td>
@@ -1041,7 +1060,7 @@ export function ModalProcesso({
           <CampoTexto
             rotulo="SEI"
             valor={form.sei}
-            aoMudar={(valor) => mudar('sei')(mascararProcessoSei(valor))}
+            aoMudar={mudar('sei')}
             placeholder="PMC.2026.00130127-81"
             ajuda="Número do processo no SEI."
           />

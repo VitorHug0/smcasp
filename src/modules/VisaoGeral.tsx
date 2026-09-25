@@ -24,11 +24,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { AlertTriangle, ClipboardList, FileText, PiggyBank, ShoppingCart } from 'lucide-react';
+import { AlertTriangle, ClipboardList, FileText, PiggyBank, ShoppingCart, UserCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { dataBR, moeda, moedaCurta, numero, textoPrazo } from '../lib/formato';
 import { CartaoKpi } from '../components/CartaoKpi';
+import { Botao } from '../components/ui/Botao';
 import { Etiqueta, tomDoPrazo } from '../components/ui/Etiqueta';
 import { Carregando, Falha, Vazio } from '../components/ui/Estados';
 import type { Contrato, DashboardData } from '../lib/types';
@@ -48,6 +49,7 @@ export interface AtalhosDaVisaoGeral {
   aoAbrirContratos?: (busca?: string) => void;
   aoAbrirEmendas?: (objetivo?: string) => void;
   aoAbrirProcessos?: () => void;
+  aoAbrirMinhasDemandas?: () => void;
   aoAbrirCompras?: () => void;
 }
 
@@ -74,6 +76,18 @@ export function VisaoGeral({ ano, atalhos = {} }: { ano: number; atalhos?: Atalh
 
   return (
     <div className="space-y-6">
+      {atalhos.aoAbrirMinhasDemandas && (
+        <div className="flex justify-end">
+          <Botao
+            aparencia="neutro"
+            icone={<UserCheck className="size-4" />}
+            onClick={atalhos.aoAbrirMinhasDemandas}
+            title="Abrir somente os processos atribuídos a mim"
+          >
+            Minhas Demandas
+          </Botao>
+        </div>
+      )}
       {/* -------------------------------------------------- KPIs */}
       <div className="surge grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <CartaoKpi

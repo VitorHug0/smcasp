@@ -19,7 +19,6 @@ import { Etiqueta } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha, Vazio } from '../components/ui/Estados';
 import { ETAPAS, ModalProcesso } from './Processos';
 import { DESFECHOS_PROCESSO, MODALIDADES } from '../lib/types';
-import { urlPncp, urlProcessoSei } from '../lib/linksProcesso';
 import type { Etapa, Processo, Setor, Usuario } from '../lib/types';
 
 type Coluna =
@@ -325,8 +324,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
                         {p.sei ? (
                           <BotaoCopiar
                             texto={p.sei}
-                            rotulo="Abrir consulta do processo no SEI Campinas"
-                            href={urlProcessoSei(p.sei)}
+                            rotulo="Copiar o número do processo"
                             className="-ml-1 font-mono text-[11px] text-slate-600"
                           />
                         ) : (
@@ -388,8 +386,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
                         {p.pncp ? (
                           <BotaoCopiar
                             texto={p.pncp}
-                            rotulo="Abrir consulta no PNCP"
-                            href={urlPncp(p.pncp)}
+                            rotulo="Copiar o número do PNCP"
                             className="-ml-1 font-mono text-[11px] text-slate-600"
                           />
                         ) : (

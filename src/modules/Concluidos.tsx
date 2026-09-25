@@ -1,5 +1,5 @@
 // =============================================================================
-//  MÓDULO 2b — Processos concluídos
+//  MÓDULO 2b — Processos encerrados
 //
 //  Aqui não há quadro: o histórico é lido em linhas, como uma planilha.
 //  Dá para ordenar clicando no cabeçalho, filtrar por setor e por modalidade,
@@ -18,13 +18,15 @@ import { BotaoCopiar } from '../components/BotaoCopiar';
 import { Etiqueta } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha, Vazio } from '../components/ui/Estados';
 import { ETAPAS, ModalProcesso } from './Processos';
-import { MODALIDADES } from '../lib/types';
+import { DESFECHOS_PROCESSO, MODALIDADES } from '../lib/types';
+import { urlPncp, urlProcessoSei } from '../lib/linksProcesso';
 import type { Etapa, Processo, Setor, Usuario } from '../lib/types';
 
 type Coluna =
   | 'sei'
   | 'objeto'
   | 'modalidade'
+  | 'desfecho'
   | 'audesp'
   | 'pncp'
   | 'setor'
@@ -36,6 +38,7 @@ const COLUNAS: Array<{ chave: Coluna; titulo: string }> = [
   { chave: 'sei', titulo: 'SEI' },
   { chave: 'objeto', titulo: 'Objeto' },
   { chave: 'modalidade', titulo: 'Modalidade' },
+  { chave: 'desfecho', titulo: 'Desfecho' },
   // AUDESP e PNCP ficam à vista: são os números que se procura depois que o
   // processo já foi concluído, para conferir a publicação obrigatória.
   { chave: 'audesp', titulo: 'AUDESP' },
@@ -66,6 +69,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
   const [busca, setBusca] = useState('');
   const [setorFiltro, setSetorFiltro] = useState('');
   const [modalidadeFiltro, setModalidadeFiltro] = useState('');
+  const [desfechoFiltro, setDesfechoFiltro] = useState('');
   const [ordem, setOrdem] = useState<{ coluna: Coluna; desc: boolean }>({
     coluna: 'data_conclusao',
     desc: true,
@@ -80,13 +84,15 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
     const filtradas = lista.filter((p) => {
       const casaBusca =
         !termo ||
-        [p.objeto, p.sei, p.audesp, p.pncp, p.status, p.responsavel_nome, p.setor_nome].some(
+        [p.objeto, p.sei, p.audesp, p.pncp, p.status, p.responsavel_nome, p.setor_nome,
+          p.desfecho, p.substituido_por].some(
           (campo) => (campo ?? '').toLowerCase().includes(termo),
         );
       return (
         casaBusca &&
         (!setorFiltro || String(p.id_setor ?? '') === setorFiltro) &&
-        (!modalidadeFiltro || p.modalidade === modalidadeFiltro)
+        (!modalidadeFiltro || p.modalidade === modalidadeFiltro) &&
+        (!desfechoFiltro || p.desfecho === desfechoFiltro)
       );
     });
 
@@ -95,6 +101,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
         case 'sei': return p.sei ?? 'zzz';
         case 'objeto': return p.objeto.toLocaleLowerCase('pt-BR');
         case 'modalidade': return (p.modalidade ?? 'zzz').toLocaleLowerCase('pt-BR');
+        case 'desfecho': return (p.desfecho ?? 'zzz').toLocaleLowerCase('pt-BR');
         case 'audesp': return p.audesp ?? 'zzz';
         case 'pncp': return p.pncp ?? 'zzz';
         case 'setor': return (p.setor_sigla ?? 'zzz').toLocaleLowerCase('pt-BR');
@@ -108,7 +115,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
       const r = valor(a).localeCompare(valor(b), 'pt-BR');
       return ordem.desc ? -r : r;
     });
-  }, [lista, busca, setorFiltro, modalidadeFiltro, ordem]);
+  }, [lista, busca, setorFiltro, modalidadeFiltro, desfechoFiltro, ordem]);
 
   // Leitor abre a ficha para ver, mas não reabre processo nem salva nada.
   const podeEditar = usePodeEditar();
@@ -154,7 +161,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Procurar por SEI, objeto, AUDESP, PNCP, responsável ou setor…"
-            aria-label="Procurar processos concluídos"
+            aria-label="Procurar processos encerrados"
             className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-3 text-base focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
           />
         </div>
@@ -186,6 +193,17 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
             <option key={m} value={m}>
               {m}
             </option>
+          ))}
+        </select>
+        <select
+          value={desfechoFiltro}
+          onChange={(e) => setDesfechoFiltro(e.target.value)}
+          aria-label="Filtrar por desfecho"
+          className={classeFiltro}
+        >
+          <option value="">Todos os desfechos</option>
+          {DESFECHOS_PROCESSO.map((item) => (
+            <option key={item} value={item}>{item}</option>
           ))}
         </select>
       </div>
@@ -224,7 +242,7 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-1 text-sm text-slate-600">
         <span>
           <strong className="text-slate-900">{numero(linhas.length)}</strong>{' '}
-          {linhas.length === 1 ? 'processo concluído' : 'processos concluídos'}
+          {linhas.length === 1 ? 'processo encerrado' : 'processos encerrados'}
         </span>
         <span>
           Entregues no prazo: <strong className="text-emerald-700">{numero(noPrazo)}</strong>
@@ -237,19 +255,20 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
 
       {linhas.length === 0 ? (
         <Vazio
-          titulo="Nenhum processo concluído por aqui"
-          texto="Assim que um processo for concluído no quadro, ele aparece nesta lista."
+          titulo="Nenhum processo encerrado por aqui"
+          texto="Assim que um processo for encerrado no quadro, ele aparece nesta lista."
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             {/* Larguras fixas: é o que dá à tela a leitura de planilha, com
                 todas as linhas na mesma altura em vez de blocos de texto. */}
-            <table className="w-full min-w-[1500px] table-fixed text-left text-sm">
+            <table className="w-full min-w-[1680px] table-fixed text-left text-sm">
               <colgroup>
                 <col className="w-[11.5%]" />
                 <col className="w-[13%]" />
                 <col className="w-[9.5%]" />
+                <col className="w-[13%]" />
                 <col className="w-[9.5%]" />
                 <col className="w-[9.5%]" />
                 <col className="w-[6.5%]" />
@@ -306,7 +325,8 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
                         {p.sei ? (
                           <BotaoCopiar
                             texto={p.sei}
-                            rotulo="Copiar o número do processo"
+                            rotulo="Abrir consulta do processo no SEI Campinas"
+                            href={urlProcessoSei(p.sei)}
                             className="-ml-1 font-mono text-[11px] text-slate-600"
                           />
                         ) : (
@@ -337,6 +357,20 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
                           </span>
                         )}
                       </td>
+                      <td className="px-3 py-2.5">
+                        <Etiqueta tom={
+                          p.desfecho === 'Concluído com compra' ? 'verde' :
+                          p.desfecho === 'Cancelado' ? 'vermelho' :
+                          p.desfecho === 'Substituído por outro processo' ? 'ambar' : 'cinza'
+                        }>
+                          {p.desfecho ?? 'Não informado'}
+                        </Etiqueta>
+                        {p.substituido_por && (
+                          <p className="mt-1 truncate font-mono text-[11px] text-slate-500" title={p.substituido_por}>
+                            Novo: {p.substituido_por}
+                          </p>
+                        )}
+                      </td>
                       {/* AUDESP e PNCP: copiáveis, como o SEI — são colados
                           nos portais na hora de conferir a publicação. */}
                       <td className="px-3 py-2.5">
@@ -354,7 +388,8 @@ export function Concluidos({ setores, usuarios }: { setores: Setor[]; usuarios: 
                         {p.pncp ? (
                           <BotaoCopiar
                             texto={p.pncp}
-                            rotulo="Copiar o número do PNCP"
+                            rotulo="Abrir consulta no PNCP"
+                            href={urlPncp(p.pncp)}
                             className="-ml-1 font-mono text-[11px] text-slate-600"
                           />
                         ) : (

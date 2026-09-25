@@ -102,6 +102,12 @@ export async function tratarApi(request: Request, env: Env): Promise<Response> {
       return await concluirProcessoComCompra(request, env, id);
     }
 
+    if (partes[0] === 'processos' && partes.length === 3 && partes[2] === 'concluir') {
+      const id = Number(partes[1]);
+      if (!Number.isInteger(id) || id <= 0) return erro('Identificador inválido.', 400);
+      return await concluirProcesso(request, env, id);
+    }
+
     const recurso = RECURSOS[partes[0]];
     if (!recurso) return erro('Recurso não encontrado.', 404);
 
@@ -352,7 +358,54 @@ function limparNulos(dados: Record<string, unknown>): Record<string, unknown> {
  */
 function ajustarDataDeConclusao(nome: string, dados: Record<string, unknown>): void {
   if (nome !== 'processos' || !('etapa' in dados)) return;
-  dados.data_conclusao = dados.etapa === 'Concluído' ? new Date().toISOString().slice(0, 10) : null;
+  // Os endpoints de encerramento preenchem a data e o desfecho. A edição
+  // genérica só pode reabrir; nesse caso limpa todo o estado de encerramento.
+  if (dados.etapa !== 'Concluído') {
+    dados.data_conclusao = null;
+    dados.desfecho = null;
+    dados.substituido_por = null;
+  }
+}
+
+const DESFECHOS_SEM_COMPRA = new Set([
+  'Concluído sem compra',
+  'Cancelado',
+  'Arquivado',
+  'Substituído por outro processo',
+]);
+
+async function concluirProcesso(request: Request, env: Env, id: number): Promise<Response> {
+  if (request.method !== 'POST') return erro('Método não permitido.', 405);
+  const atual = await env.DB.prepare('SELECT etapa, sei FROM processos WHERE id = ?')
+    .bind(id).first<{ etapa: string; sei: string | null }>();
+  if (!atual) return erro('Processo não encontrado.', 404);
+  if (atual.etapa === 'Concluído') return erro('Este processo já está concluído.', 409);
+
+  const corpo = await lerCorpo(request);
+  const desfecho = typeof corpo.desfecho === 'string' ? corpo.desfecho.trim() : '';
+  if (!DESFECHOS_SEM_COMPRA.has(desfecho)) {
+    throw new ErroDeValidacao('Escolha um desfecho válido para o processo.');
+  }
+
+  let substituidoPor: string | null = null;
+  if (desfecho === 'Substituído por outro processo') {
+    substituidoPor = typeof corpo.substituido_por === 'string' ? corpo.substituido_por.trim() : '';
+    if (!substituidoPor) {
+      throw new ErroDeValidacao('Informe o número do processo que substituiu este.');
+    }
+    if (substituidoPor.length > 2000) {
+      throw new ErroDeValidacao('O número do processo substituto é longo demais.');
+    }
+    if (atual.sei && atual.sei.trim().toLocaleUpperCase('pt-BR') === substituidoPor.toLocaleUpperCase('pt-BR')) {
+      throw new ErroDeValidacao('O processo substituto deve ser diferente do processo atual.');
+    }
+  }
+
+  await env.DB.prepare(`UPDATE processos
+    SET etapa = 'Concluído', data_conclusao = date('now'), desfecho = ?, substituido_por = ?
+    WHERE id = ? AND etapa <> 'Concluído'`)
+    .bind(desfecho, substituidoPor, id).run();
+  return obter(env, 'processos', id);
 }
 
 /** Regras que dependem de mais de um campo ao mesmo tempo. */

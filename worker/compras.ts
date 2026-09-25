@@ -255,7 +255,9 @@ export async function concluirProcessoComCompra(
       item,
       ordem,
     )),
-    env.DB.prepare(`UPDATE processos SET etapa = 'Concluído', data_conclusao = date('now')
+    env.DB.prepare(`UPDATE processos
+      SET etapa = 'Concluído', data_conclusao = date('now'),
+          desfecho = 'Concluído com compra', substituido_por = NULL
       WHERE id = ? AND etapa <> 'Concluído'`).bind(idProcesso),
   ];
   await env.DB.batch(comandos);

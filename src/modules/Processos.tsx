@@ -26,8 +26,9 @@ import { CampoLista, CampoTexto } from '../components/ui/Campo';
 import { SelecaoNaLinha, TextoEditavel } from '../components/ui/CelulaEditavel';
 import { tomDoPrazoTarefa } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha } from '../components/ui/Estados';
-import { ETAPAS_DO_QUADRO, MODALIDADES, PRIORIDADES } from '../lib/types';
+import { DESFECHOS_PROCESSO, ETAPAS_DO_QUADRO, MODALIDADES, PRIORIDADES } from '../lib/types';
 import { processarNotaEmpenho } from '../lib/notaEmpenho';
+import { mascararProcessoSei, urlPncp, urlProcessoSei } from '../lib/linksProcesso';
 import {
   FormularioCompra,
   dadosDoFormulario,
@@ -35,7 +36,7 @@ import {
   validarFormularioCompra,
   type FormularioCompraEstado,
 } from '../components/compras/FormularioCompra';
-import type { Etapa, EtapaAberta, Modalidade, Prioridade, Processo, Setor, Usuario } from '../lib/types';
+import type { DesfechoProcesso, Etapa, EtapaAberta, Modalidade, Prioridade, Processo, Setor, Usuario } from '../lib/types';
 
 /** As faixas da planilha, na ordem em que o processo caminha. */
 export const ETAPAS: Array<{ chave: EtapaAberta; titulo: string; faixa: string }> = [
@@ -75,7 +76,7 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
   const [modalAberto, setModalAberto] = useState(false);
   const [emEdicao, setEmEdicao] = useState<Processo | null>(null);
   const [falhaAoSalvar, setFalhaAoSalvar] = useState<string | null>(null);
-  const [concluido, setConcluido] = useState<string | null>(null);
+  const [concluido, setConcluido] = useState<{ objeto: string; desfecho?: DesfechoProcesso } | null>(null);
   const [paraConcluir, setParaConcluir] = useState<Processo | null>(null);
   const [apagado, setApagado] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
@@ -130,7 +131,7 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
 
     try {
       const atualizado = await api.processos.ajustar(processo.id, mudanca);
-      if (virouConcluido) setConcluido(processo.objeto);
+      if (virouConcluido) setConcluido({ objeto: processo.objeto, desfecho: processo.desfecho ?? undefined });
       else setLista((atual) => (atual ?? []).map((p) => (p.id === atualizado.id ? atualizado : p)));
     } catch (e) {
       setLista(anterior);
@@ -300,14 +301,15 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <Check className="size-4 shrink-0" />
           <span className="flex-1">
-            <strong>{concluido}</strong> foi concluído e saiu desta lista.
+            <strong>{concluido.objeto}</strong> foi encerrado
+            {concluido.desfecho ? <> como <strong>{concluido.desfecho}</strong></> : null} e saiu desta lista.
           </span>
           <button
             type="button"
             onClick={aoAbrirConcluidos}
             className="font-bold text-emerald-800 underline underline-offset-2 hover:text-emerald-900"
           >
-            Ver em Concluídos
+            Ver em Encerrados
           </button>
           <button
             type="button"
@@ -437,10 +439,10 @@ export function Processos({ setores, usuarios, aoAbrirConcluidos }: Props) {
         processo={paraConcluir}
         setores={setores}
         aoFechar={() => setParaConcluir(null)}
-        aoConcluir={() => {
+        aoConcluir={(desfecho) => {
           if (!paraConcluir) return;
           setLista(processos.filter((p) => p.id !== paraConcluir.id));
-          setConcluido(paraConcluir.objeto);
+          setConcluido({ objeto: paraConcluir.objeto, desfecho });
           setParaConcluir(null);
         }}
       />
@@ -485,7 +487,8 @@ function LinhaProcesso({
         {processo.sei ? (
           <BotaoCopiar
             texto={processo.sei}
-            rotulo="Copiar o número do processo"
+            rotulo="Abrir consulta do processo no SEI Campinas"
+            href={urlProcessoSei(processo.sei)}
             className="w-full font-mono text-[11px] text-slate-700"
           />
         ) : (
@@ -549,6 +552,8 @@ function LinhaProcesso({
           valor={processo.pncp}
           monoespacado
           linhas={1}
+          href={urlPncp(processo.pncp)}
+          rotuloLink="Abrir consulta no PNCP"
           aoSalvar={(v) => aoAjustar(processo, { pncp: v })}
         />
       </td>
@@ -625,7 +630,7 @@ function LinhaProcesso({
               {e.titulo}
             </option>
           ))}
-          <option value="Concluído">✓ Concluir</option>
+          <option value="Concluído">✓ Encerrar…</option>
         </select>
         )}
       </td>
@@ -649,14 +654,14 @@ function LinhaProcesso({
 }
 
 // -----------------------------------------------------------------------------
-// Conclusão com Nota de Empenho
+// Encerramento do processo
 // -----------------------------------------------------------------------------
 
 function ModalConclusao({ processo, setores, aoFechar, aoConcluir }: {
   processo: Processo | null;
   setores: Setor[];
   aoFechar: () => void;
-  aoConcluir: () => void;
+  aoConcluir: (desfecho: DesfechoProcesso) => void;
 }) {
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [form, setForm] = useState<FormularioCompraEstado>(() => estadoCompraInicial());
@@ -667,11 +672,14 @@ function ModalConclusao({ processo, setores, aoFechar, aoConcluir }: {
   const [processando, setProcessando] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
   const [conferindo, setConferindo] = useState(false);
+  const [desfecho, setDesfecho] = useState<DesfechoProcesso | ''>('');
+  const [substituidoPor, setSubstituidoPor] = useState('');
   const chave = processo?.id ?? 0;
   const [chaveAnterior, setChaveAnterior] = useState(chave);
   if (chaveAnterior !== chave) {
     setChaveAnterior(chave); setArquivo(null); setForm(estadoCompraInicial()); setHash('');
     setAvisos([]); setErros({}); setFalha(null); setConferindo(false);
+    setDesfecho(''); setSubstituidoPor('');
   }
 
   async function processar() {
@@ -704,22 +712,69 @@ function ModalConclusao({ processo, setores, aoFechar, aoConcluir }: {
       await api.processos.concluirComCompra(processo.id, {
         ...dadosDoFormulario(form), nota_nome: arquivo.name, nota_hash: hash,
       });
-      aoConcluir();
+      aoConcluir('Concluído com compra');
     } catch (e) {
       setFalha(e instanceof ErroDaApi ? e.message : 'Não foi possível concluir o processo. Nenhum dado foi alterado.');
     } finally { setConfirmando(false); }
   }
 
-  return <Modal aberto={processo !== null} largura="grande" titulo="Concluir processo"
-    descricao="A compra e seus itens serão criados antes de o processo ser concluído." aoFechar={aoFechar}
+  async function confirmarSemCompra() {
+    if (!processo || !desfecho || desfecho === 'Concluído com compra') return;
+    if (desfecho === 'Substituído por outro processo' && !substituidoPor.trim()) {
+      setFalha('Informe o número do processo que substituiu este.');
+      return;
+    }
+    setConfirmando(true); setFalha(null);
+    try {
+      await api.processos.concluir(processo.id, desfecho, substituidoPor);
+      aoConcluir(desfecho);
+    } catch (e) {
+      setFalha(e instanceof ErroDaApi ? e.message : 'Não foi possível encerrar o processo. Nenhum dado foi alterado.');
+    } finally { setConfirmando(false); }
+  }
+
+  function escolherDesfecho(valor: string) {
+    setDesfecho(valor as DesfechoProcesso | '');
+    setFalha(null); setConferindo(false); setArquivo(null); setHash('');
+    setAvisos([]); setErros({});
+    if (valor !== 'Substituído por outro processo') setSubstituidoPor('');
+  }
+
+  return <Modal aberto={processo !== null} largura="grande" titulo="Encerrar processo"
+    descricao="Escolha como o processo foi encerrado. Somente a conclusão com compra exige Nota de Empenho." aoFechar={aoFechar}
     rodape={<><Botao aparencia="neutro" onClick={aoFechar}>Cancelar</Botao>
-      {conferindo ? <Botao aparencia="primario" onClick={confirmar} carregando={confirmando}>Confirmar e concluir processo</Botao> :
-        <Botao aparencia="primario" onClick={processar} carregando={processando} disabled={!arquivo}>Processar Nota de Empenho</Botao>}
+      {desfecho === 'Concluído com compra' ? (
+        conferindo ? <Botao aparencia="primario" onClick={confirmar} carregando={confirmando}>Confirmar compra e encerrar</Botao> :
+          <Botao aparencia="primario" onClick={processar} carregando={processando} disabled={!arquivo}>Processar Nota de Empenho</Botao>
+      ) : (
+        <Botao aparencia="primario" onClick={confirmarSemCompra} carregando={confirmando}
+          disabled={!desfecho || (desfecho === 'Substituído por outro processo' && !substituidoPor.trim())}>
+          Confirmar encerramento
+        </Botao>
+      )}
     </>}>
     <div className="space-y-5">
       {falha && <AvisoErro mensagem={falha} />}
-      {!conferindo ? <div>
-        <p className="mb-4 text-sm text-slate-700">Anexe a Nota de Empenho para concluir <strong>{processo?.objeto}</strong>.</p>
+      <CampoLista rotulo="Desfecho" obrigatorio valor={desfecho} aoMudar={escolherDesfecho}
+        vazio="Selecione como o processo terminou"
+        opcoes={DESFECHOS_PROCESSO.map((item) => ({ valor: item, texto: item }))} />
+
+      {desfecho === 'Substituído por outro processo' && (
+        <CampoTexto rotulo="Processo substituto" obrigatorio valor={substituidoPor}
+          aoMudar={(valor) => { setSubstituidoPor(valor); setFalha(null); }}
+          placeholder="PMC.2026.00130127-81"
+          ajuda="Informe o número do processo que passou a tratar deste assunto." />
+      )}
+
+      {desfecho && desfecho !== 'Concluído com compra' && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          <strong>{processo?.objeto}</strong> sairá do quadro com o desfecho <strong>{desfecho}</strong>.
+          Nenhuma compra ou Nota de Empenho será criada.
+        </div>
+      )}
+
+      {desfecho === 'Concluído com compra' && (!conferindo ? <div>
+        <p className="mb-4 text-sm text-slate-700">Anexe a Nota de Empenho para concluir <strong>{processo?.objeto}</strong> com compra.</p>
         <label className="flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-300 p-8 text-center hover:border-marca-400 hover:bg-marca-50/40">
           <FileUp className="size-8 text-marca-600" />
           <span className="font-semibold text-slate-800">{arquivo?.name ?? 'Selecionar PDF'}</span>
@@ -737,7 +792,7 @@ function ModalConclusao({ processo, setores, aoFechar, aoConcluir }: {
           <p className="mt-1">Processo atual: <strong>{processo?.sei ?? 'não informado'}</strong><br />Processo identificado: <strong>{form.numero_processo || 'não identificado'}</strong></p>
         </div>}
         <FormularioCompra form={form} aoMudar={setForm} setores={setores} erros={erros} processoBloqueado />
-      </>}
+      </>)}
     </div>
   </Modal>;
 }
@@ -970,18 +1025,23 @@ export function ModalProcesso({
         {/* A data de conclusão é preenchida pela API, não se digita — então
             aparece como informação, e não como campo. */}
         {processo?.etapa === 'Concluído' && (
-          <p className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-900">
-            <Check className="size-4 shrink-0" />
-            Processo concluído em{' '}
-            <strong className="font-semibold">{dataBR(processo.data_conclusao)}</strong>
-          </p>
+          <div className="rounded-lg bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-900">
+            <p className="flex items-center gap-2">
+              <Check className="size-4 shrink-0" />
+              <strong>{processo.desfecho ?? 'Processo concluído'}</strong> em{' '}
+              <strong className="font-semibold">{dataBR(processo.data_conclusao)}</strong>
+            </p>
+            {processo.substituido_por && (
+              <p className="mt-1 pl-6">Processo substituto: <strong>{processo.substituido_por}</strong></p>
+            )}
+          </div>
         )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <CampoTexto
             rotulo="SEI"
             valor={form.sei}
-            aoMudar={mudar('sei')}
+            aoMudar={(valor) => mudar('sei')(mascararProcessoSei(valor))}
             placeholder="PMC.2026.00130127-81"
             ajuda="Número do processo no SEI."
           />

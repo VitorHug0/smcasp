@@ -21,6 +21,15 @@ export const ETAPAS_DO_QUADRO = [
 export type EtapaAberta = (typeof ETAPAS_DO_QUADRO)[number];
 export type Etapa = EtapaAberta | 'Concluído';
 
+export const DESFECHOS_PROCESSO = [
+  'Concluído com compra',
+  'Concluído sem compra',
+  'Cancelado',
+  'Arquivado',
+  'Substituído por outro processo',
+] as const;
+export type DesfechoProcesso = (typeof DESFECHOS_PROCESSO)[number];
+
 export const PRIORIDADES = ['Baixa', 'Média', 'Alta', 'Muito Alta'] as const;
 export type Prioridade = (typeof PRIORIDADES)[number];
 
@@ -251,6 +260,10 @@ export interface Processo {
   data_limite: string | null;
   /** Preenchida pela API quando a etapa vira 'Concluído'. */
   data_conclusao: string | null;
+  /** Motivo pelo qual o processo saiu do quadro. */
+  desfecho: DesfechoProcesso | null;
+  /** Número do processo sucessor, quando este foi substituído. */
+  substituido_por: string | null;
   id_setor: number | null;
   /** Campos calculados pela API */
   responsavel_nome?: string | null;

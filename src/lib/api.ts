@@ -17,6 +17,7 @@ import type {
   Setor,
   SituacaoUsuario,
   Usuario,
+  DesfechoProcesso,
   UsuarioAdmin,
   UsuarioSessao,
 } from './types';
@@ -203,6 +204,11 @@ export const api = {
     excluir: (id: number) => pedir<void>(`/processos/${id}`, { method: 'DELETE' }),
     concluirComCompra: (id: number, d: DadosCompra) =>
       pedir<Compra>(`/processos/${id}/concluir-compra`, { method: 'POST', ...corpo(d) }),
+    concluir: (id: number, desfecho: Exclude<DesfechoProcesso, 'Concluído com compra'>, substituido_por?: string) =>
+      pedir<Processo>(`/processos/${id}/concluir`, {
+        method: 'POST',
+        ...corpo({ desfecho, substituido_por: substituido_por?.trim() || null }),
+      }),
   },
 
   compras: {

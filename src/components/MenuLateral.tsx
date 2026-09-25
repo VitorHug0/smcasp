@@ -54,8 +54,8 @@ export const ITENS_MENU: ItemMenu[] = [
   },
   {
     chave: 'concluidos',
-    titulo: 'Concluídos',
-    explicacao: 'Histórico em forma de planilha',
+    titulo: 'Encerrados',
+    explicacao: 'Histórico por desfecho',
     Icone: ListChecks,
     rota: '/concluidos',
   },

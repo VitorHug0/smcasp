@@ -288,6 +288,10 @@ CREATE TABLE processos (
                   CHECK (prioridade IN ('Baixa', 'Média', 'Alta', 'Muito Alta')),
   data_limite     TEXT,
   data_conclusao  TEXT,
+  desfecho        TEXT CHECK (desfecho IS NULL OR desfecho IN
+                    ('Concluído com compra', 'Concluído sem compra', 'Cancelado',
+                     'Arquivado', 'Substituído por outro processo')),
+  substituido_por TEXT,
   id_setor        INTEGER REFERENCES setores(id) ON DELETE SET NULL,
   criado_em       TEXT NOT NULL DEFAULT (datetime('now')),
   atualizado_em   TEXT NOT NULL DEFAULT (datetime('now'))

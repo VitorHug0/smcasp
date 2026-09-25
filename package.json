@@ -12,6 +12,7 @@
     "db:local": "wrangler d1 execute secretaria-db --local --file=./migrations/0001_schema.sql && wrangler d1 execute secretaria-db --local --file=./migrations/0002_seed.sql && wrangler d1 execute secretaria-db --local --file=./migrations/0005_compras_empenhos.sql",
     "db:remote": "wrangler d1 execute secretaria-db --remote --file=./migrations/0001_schema.sql && wrangler d1 execute secretaria-db --remote --file=./migrations/0002_seed.sql && wrangler d1 execute secretaria-db --remote --file=./migrations/0005_compras_empenhos.sql",
     "db:compras": "wrangler d1 execute secretaria-db --remote --file=./migrations/0005_compras_empenhos.sql",
+    "db:desfechos": "wrangler d1 execute secretaria-db --remote --file=./migrations/0006_desfechos_processos.sql",
     "db:acesso": "wrangler d1 execute secretaria-db --remote --file=./migrations/0003_acesso.sql",
     "db:backup": "wrangler d1 export secretaria-db --remote --output=backup.sql",
     "start": "npm run build && wrangler dev",

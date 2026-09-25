@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { ExternalLink, Pencil } from 'lucide-react';
 import { moeda, paraNumero, valorSimples } from '../../lib/formato';
 import { usePodeEditar } from '../../lib/permissoes';
 
@@ -29,6 +30,8 @@ export function TextoEditavel({
   linhas = 2,
   className = '',
   monoespacado = false,
+  href,
+  rotuloLink = 'Abrir consulta',
 }: {
   valor: string | null;
   aoSalvar: (texto: string | null) => void;
@@ -36,6 +39,9 @@ export function TextoEditavel({
   linhas?: number;
   className?: string;
   monoespacado?: boolean;
+  /** Consulta externa exibida em repouso; a edição continua no lápis ao lado. */
+  href?: string | null;
+  rotuloLink?: string;
 }) {
   const podeEditar = usePodeEditar();
   const [editando, setEditando] = useState(false);
@@ -43,6 +49,37 @@ export function TextoEditavel({
   useEffect(() => setTexto(valor ?? ''), [valor]);
 
   const fonte = monoespacado ? 'font-mono text-[11px]' : '';
+
+  if (!editando && valor && href) {
+    return (
+      <span className="flex min-w-0 items-center gap-0.5">
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`${rotuloLink}: ${valor}`}
+          aria-label={`${rotuloLink} ${valor} em nova aba`}
+          className={`group/link inline-flex min-w-0 flex-1 items-center gap-1 rounded px-1.5 py-1
+            leading-snug underline decoration-dotted underline-offset-2 hover:bg-white hover:text-marca-700
+            focus-visible:ring-2 focus-visible:ring-marca-500 ${fonte} ${className}`}
+        >
+          <span className="truncate">{valor}</span>
+          <ExternalLink className="size-3 shrink-0 text-slate-400 group-hover/link:text-marca-600" aria-hidden="true" />
+        </a>
+        {podeEditar && (
+          <button
+            type="button"
+            onClick={() => setEditando(true)}
+            title={`Editar ${valor}`}
+            aria-label={`Editar ${valor}`}
+            className="shrink-0 rounded p-1 text-slate-400 hover:bg-white hover:text-marca-700 focus-visible:ring-2 focus-visible:ring-marca-500"
+          >
+            <Pencil className="size-3" aria-hidden="true" />
+          </button>
+        )}
+      </span>
+    );
+  }
 
   if (!podeEditar) {
     return (

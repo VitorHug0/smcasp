@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, ExternalLink } from 'lucide-react';
 
 /**
  * Texto que se copia com um clique — feito para o número do SEI, que é
@@ -13,10 +13,13 @@ export function BotaoCopiar({
   texto,
   rotulo = 'Copiar',
   className = '',
+  href,
 }: {
   texto: string;
   rotulo?: string;
   className?: string;
+  /** Quando presente, o número abre a consulta externa em vez de ser copiado. */
+  href?: string | null;
 }) {
   const [estado, setEstado] = useState<'parado' | 'copiado'>('parado');
   const alvo = useRef<HTMLSpanElement>(null);
@@ -66,6 +69,24 @@ export function BotaoCopiar({
         selecionarComoUltimoRecurso();
       }
     }
+  }
+
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${rotulo}: ${texto}`}
+        aria-label={`${rotulo} ${texto} em nova aba`}
+        className={`group/link inline-flex max-w-full items-center gap-1 rounded px-0.5 py-0.5 text-left
+          underline decoration-dotted underline-offset-2 hover:bg-slate-100 hover:text-marca-700
+          focus-visible:bg-slate-100 focus-visible:text-marca-700 ${className}`}
+      >
+        <span className="truncate">{texto}</span>
+        <ExternalLink className="size-3 shrink-0 text-slate-400 group-hover/link:text-marca-600" aria-hidden="true" />
+      </a>
+    );
   }
 
   return (

@@ -632,19 +632,19 @@ INSERT INTO processos (sei, objeto, modalidade, emenda, audesp, pncp, status, pr
    NULL, 'Baixa', 6, NULL, 'Outros', NULL, 4);
 
 -- ---- Concluídos (vão para a tela de Concluídos, não aparecem na planilha)
-INSERT INTO processos (sei, objeto, modalidade, emenda, audesp, pncp, status, prioridade, id_responsavel, id_responsavel_2, etapa, data_limite, data_conclusao, id_setor) VALUES
+INSERT INTO processos (sei, objeto, modalidade, emenda, audesp, pncp, status, prioridade, id_responsavel, id_responsavel_2, etapa, data_limite, data_conclusao, desfecho, id_setor) VALUES
   ('PMC.2026.00118002-11', 'Extrato do contrato CT-009/2026', 'INEX', 0, NULL, '46379400600032025',
-   'Publicado e arquivado', 'Média', 1, 5, 'Concluído', date('now','-12 days'), date('now','-14 days'), 3),
+   'Publicado e arquivado', 'Média', 1, 5, 'Concluído', date('now','-12 days'), date('now','-14 days'), 'Arquivado', 3),
   ('PMC.2026.00110447-29', 'Curso de reciclagem em uso progressivo da força', 'CREDENCIAMENTO', 0, NULL, NULL,
-   'Todas as turmas concluídas', 'Baixa', 4, 6, 'Concluído', date('now','-25 days'), date('now','-28 days'), 12),
+   'Todas as turmas concluídas', 'Baixa', 4, 6, 'Concluído', date('now','-25 days'), date('now','-28 days'), 'Concluído sem compra', 12),
   ('PMC.2026.00105930-64', 'Uniformes operacionais 2025', 'ARP', 0, NULL, NULL,
-   'Entrega conferida e aceita', 'Média', 2, 3, 'Concluído', date('now','-40 days'), date('now','-38 days'), 12),
+   'Entrega conferida e aceita', 'Média', 2, 3, 'Concluído', date('now','-40 days'), date('now','-38 days'), 'Concluído com compra', 12),
   ('PMC.2025.00099120-05', 'Empenho da emenda EP-2025-0902', NULL, 1, '2025000000088', NULL,
-   'Empenho concluído', 'Alta', 3, NULL, 'Concluído', date('now','-70 days'), date('now','-73 days'), 16),
+   'Empenho concluído', 'Alta', 3, NULL, 'Concluído', date('now','-70 days'), date('now','-73 days'), 'Concluído com compra', 16),
   ('PMC.2026.00101288-37', 'Seguro da frota', 'PRORROGAÇÃO', 0, NULL, NULL,
-   'Apólice arquivada', 'Média', 2, 4, 'Concluído', date('now','-55 days'), date('now','-55 days'), 4),
+   'Apólice arquivada', 'Média', 2, 4, 'Concluído', date('now','-55 days'), date('now','-55 days'), 'Concluído sem compra', 4),
   ('PMC.2026.00097745-90', 'Remessa AUDESP do 1º quadrimestre', NULL, 0, '2025000000041', NULL,
-   'Recibo arquivado', 'Alta', 3, NULL, 'Concluído', date('now','-90 days'), date('now','-95 days'), 7);
+   'Recibo arquivado', 'Alta', 3, NULL, 'Concluído', date('now','-90 days'), date('now','-95 days'), 'Arquivado', 7);
 
 -- AQUISICOES ------------------------------------------------------------------
 INSERT INTO aquisicoes (item_comprado, quantidade, valor_total, data_compra, id_setor_destino, id_contrato_origem) VALUES

@@ -232,7 +232,7 @@ export const RECURSOS: Record<string, Recurso> = {
       SELECT p.id, p.sei, p.objeto, p.descricao, p.modalidade, p.emenda,
              p.audesp, p.pncp, p.status,
              p.id_responsavel, p.id_responsavel_2, p.etapa, p.prioridade,
-             p.data_limite, p.data_conclusao, p.id_setor,
+             p.data_limite, p.data_conclusao, p.desfecho, p.substituido_por, p.id_setor,
              u.nome  AS responsavel_nome,
              u2.nome AS responsavel_2_nome,
              s.sigla AS setor_sigla,

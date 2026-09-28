@@ -38,7 +38,7 @@ export class ErroDeValidacao extends Error {}
 // Definição de campos
 // -----------------------------------------------------------------------------
 
-export type TipoCampo = 'texto' | 'numero' | 'inteiro' | 'data' | 'opcao' | 'ref';
+export type TipoCampo = 'texto' | 'url' | 'numero' | 'inteiro' | 'data' | 'opcao' | 'ref';
 
 export interface Campo {
   nome: string;
@@ -69,6 +69,21 @@ function converter(campo: Campo, bruto: unknown): unknown {
       }
       if (texto.length > 2000) {
         throw new ErroDeValidacao(`O campo "${campo.rotulo}" é longo demais.`);
+      }
+      return texto;
+    }
+    case 'url': {
+      const texto = String(bruto).trim();
+      if (texto.length > 2000) {
+        throw new ErroDeValidacao(`O campo "${campo.rotulo}" é longo demais.`);
+      }
+      try {
+        const url = new URL(texto);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('protocolo');
+      } catch {
+        throw new ErroDeValidacao(
+          `O campo "${campo.rotulo}" precisa ser uma URL HTTP ou HTTPS válida.`,
+        );
       }
       return texto;
     }

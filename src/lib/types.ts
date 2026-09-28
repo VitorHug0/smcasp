@@ -200,6 +200,8 @@ export interface Contrato {
   /** Coluna "EMPRESA" da planilha. */
   fornecedor: string;
   objeto: string | null;
+  /** Endereço externo do documento do contrato (OneDrive, SharePoint etc.). */
+  document_url: string | null;
   /** Coluna "Data 1º Contrato". */
   data_inicio: string | null;
   /** Coluna "Término" — é o que dispara o alerta de renovação. */

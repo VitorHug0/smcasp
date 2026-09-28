@@ -123,6 +123,7 @@ export const RECURSOS: Record<string, Recurso> = {
       { nome: 'numero_ultimo_ajuste', tipo: 'texto', rotulo: 'Número do último ajuste' },
       { nome: 'fornecedor', tipo: 'texto', obrigatorio: true, rotulo: 'Empresa' },
       { nome: 'objeto', tipo: 'texto', rotulo: 'Objeto do contrato' },
+      { nome: 'document_url', tipo: 'url', rotulo: 'Link do contrato' },
       { nome: 'data_inicio', tipo: 'data', rotulo: 'Data do 1º contrato' },
       { nome: 'data_fim_vigencia', tipo: 'data', rotulo: 'Término' },
       { nome: 'duracao', tipo: 'texto', rotulo: 'Duração' },
@@ -150,7 +151,7 @@ export const RECURSOS: Record<string, Recurso> = {
     // Previsão informada e lançamentos mensais são independentes e por ano.
     select: `
       SELECT c.id, c.sei, c.numero_contrato, c.numero_ultimo_ajuste,
-             c.fornecedor, c.objeto,
+             c.fornecedor, c.objeto, c.document_url,
              c.data_inicio, c.data_fim_vigencia, c.duracao, c.data_base_reajuste,
              c.interesse_renovar, c.gestor, c.fiscal,
              ${FATURAS_FUTURAS} AS faturas_futuras, c.empenho, c.reservado, c.sme,

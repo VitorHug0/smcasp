@@ -45,7 +45,7 @@ interface TextoProps {
   erro?: string;
   obrigatorio?: boolean;
   placeholder?: string;
-  tipo?: 'text' | 'email' | 'date' | 'number';
+  tipo?: 'text' | 'email' | 'url' | 'date' | 'number';
   min?: number;
   linhas?: number;
   /**

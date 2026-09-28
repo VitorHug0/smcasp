@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   CalendarClock,
   Coins,
+  ExternalLink,
   Pencil,
   Plus,
   Search,
@@ -72,6 +73,15 @@ const ROTULO_RENOVAR: Record<InteresseRenovar, string> = {
 /** Saldo que a planilha calcula: o que entrou menos o que ainda vai faturar. */
 const saldoCalculado = (c: Contrato): number =>
   (c.empenho ?? 0) + (c.reservado ?? 0) + (c.sme ?? 0) - (c.faturas_futuras ?? 0);
+
+function urlHttpValida(valor: string): boolean {
+  try {
+    const url = new URL(valor);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 type Visao = 'vigencia' | 'pagamentos';
 
@@ -385,6 +395,18 @@ function CartaoContrato({
         <div className="mt-3">
           <BotaoCopiar texto={contrato.sei} />
         </div>
+      )}
+
+      {contrato.document_url && (
+        <a
+          href={contrato.document_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex w-fit items-center gap-1.5 text-sm font-semibold text-marca-700 hover:text-marca-900 hover:underline"
+        >
+          <ExternalLink className="size-4" />
+          Abrir contrato ↗
+        </a>
       )}
 
       {/* Vigência */}
@@ -970,6 +992,7 @@ function ModalContrato({
     numero_ultimo_ajuste: contrato?.numero_ultimo_ajuste ?? '',
     fornecedor: contrato?.fornecedor ?? '',
     objeto: contrato?.objeto ?? '',
+    document_url: contrato?.document_url ?? '',
     data_inicio: contrato?.data_inicio ?? '',
     data_fim_vigencia: contrato?.data_fim_vigencia ?? '',
     duracao: contrato?.duracao ?? '',
@@ -1004,6 +1027,9 @@ function ModalContrato({
   async function enviar() {
     const e: Record<string, string> = {};
     if (!form.fornecedor.trim()) e.fornecedor = 'Informe a empresa contratada.';
+    if (form.document_url.trim() && !urlHttpValida(form.document_url.trim())) {
+      e.document_url = 'Informe uma URL válida começando com http:// ou https://.';
+    }
     if (
       form.data_inicio &&
       form.data_fim_vigencia &&
@@ -1022,6 +1048,7 @@ function ModalContrato({
       numero_ultimo_ajuste: form.numero_ultimo_ajuste.trim() || null,
       fornecedor: form.fornecedor.trim(),
       objeto: form.objeto.trim() || null,
+      document_url: form.document_url.trim() || null,
       data_inicio: form.data_inicio || null,
       data_fim_vigencia: form.data_fim_vigencia || null,
       duracao: form.duracao.trim() || null,
@@ -1092,6 +1119,16 @@ function ModalContrato({
           valor={form.objeto}
           aoMudar={mudar('objeto')}
           placeholder="Ex.: Locação de veículos"
+        />
+
+        <CampoTexto
+          rotulo="Link do contrato"
+          tipo="url"
+          valor={form.document_url}
+          aoMudar={mudar('document_url')}
+          erro={erros.document_url}
+          placeholder="https://…"
+          ajuda="Cole o link externo do documento no OneDrive, SharePoint ou outro serviço."
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

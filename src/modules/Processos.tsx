@@ -11,20 +11,36 @@
 //  Concluídos.
 // =============================================================================
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, FileSpreadsheet, FileUp, Pencil, Plus, Search, Trash2, UserCheck } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  FileSpreadsheet,
+  FileUp,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  UserCheck,
+  X,
+} from 'lucide-react';
 import { api, ErroDaApi } from '../lib/api';
 import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
 import { exportarParaExcel } from '../lib/exportarProcessos';
 import { opcoesDeSetor } from '../lib/setores';
-import { dataBR, hojeISO, textoPrazo } from '../lib/formato';
+import { dataBR, hojeISO } from '../lib/formato';
+import { Avatar } from '../components/Avatar';
 import { BotaoCopiar } from '../components/BotaoCopiar';
 import { Botao } from '../components/ui/Botao';
 import { Modal } from '../components/ui/Modal';
 import { CampoLista, CampoTexto } from '../components/ui/Campo';
 import { SelecaoNaLinha, TextoEditavel } from '../components/ui/CelulaEditavel';
-import { tomDoPrazoTarefa } from '../components/ui/Etiqueta';
 import { AvisoErro, Carregando, Falha } from '../components/ui/Estados';
 import { DESFECHOS_PROCESSO, ETAPAS_DO_QUADRO, MODALIDADES, PRIORIDADES } from '../lib/types';
 import { processarNotaEmpenho } from '../lib/notaEmpenho';
@@ -47,15 +63,17 @@ export const ETAPAS: Array<{ chave: EtapaAberta; titulo: string; faixa: string }
   { chave: 'Outros', titulo: 'Outros', faixa: 'Outros' },
 ];
 
-const COLUNAS_DA_TABELA = 12;
+const COLUNAS_DA_TABELA = 10;
 
-/** Cor do texto da prioridade — a mesma escala usada no resto do sistema. */
+/** Cor do texto e fundo da prioridade. */
 const COR_PRIORIDADE: Record<Prioridade, string> = {
-  'Muito Alta': 'text-red-700 font-bold',
-  Alta: 'text-red-600 font-semibold',
-  Média: 'text-amber-700 font-semibold',
-  Baixa: 'text-slate-500',
+  'Muito Alta': 'text-red-700 bg-red-50 ring-red-200/80 font-bold',
+  Alta: 'text-red-700 bg-red-50/70 ring-red-200/60 font-semibold',
+  Média: 'text-amber-800 bg-amber-50 ring-amber-200 font-medium',
+  Baixa: 'text-slate-600 bg-slate-100 ring-slate-200 font-normal',
 };
+
+type FiltroRapido = 'todos' | 'atrasados' | 'emenda' | 'prioridade_alta';
 
 interface Props {
   setores: Setor[];
@@ -91,6 +109,8 @@ export function Processos({
   const [busca, setBusca] = useState('');
   const [responsavelFiltro, setResponsavelFiltro] = useState('');
   const [prioridadeFiltro, setPrioridadeFiltro] = useState('');
+  const [filtroRapido, setFiltroRapido] = useState<FiltroRapido>('todos');
+  const [etapasRecolhidas, setEtapasRecolhidas] = useState<Set<EtapaAberta>>(() => new Set());
   const [exportando, setExportando] = useState(false);
   const [exportado, setExportado] = useState<number | null>(null);
 
@@ -98,6 +118,23 @@ export function Processos({
     if (dados) setLista(dados);
   }, [dados]);
   const processos = lista ?? dados ?? [];
+
+  const contadores = useMemo(() => {
+    let atrasados = 0;
+    let emenda = 0;
+    let prioridadeAlta = 0;
+    for (const p of processos) {
+      if (typeof p.dias_para_prazo === 'number' && p.dias_para_prazo < 0) atrasados++;
+      if (p.emenda === 1) emenda++;
+      if (p.prioridade === 'Alta' || p.prioridade === 'Muito Alta') prioridadeAlta++;
+    }
+    return {
+      todos: processos.length,
+      atrasados,
+      emenda,
+      prioridadeAlta,
+    };
+  }, [processos]);
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -118,9 +155,35 @@ export function Processos({
         !somenteMinhasDemandas ||
         p.id_responsavel === usuarioAtualId ||
         p.id_responsavel_2 === usuarioAtualId;
-      return casaBusca && casaResponsavel && casaPrioridade && casaMinhasDemandas;
+      const casaFiltroRapido =
+        filtroRapido === 'todos' ||
+        (filtroRapido === 'atrasados' && typeof p.dias_para_prazo === 'number' && p.dias_para_prazo < 0) ||
+        (filtroRapido === 'emenda' && p.emenda === 1) ||
+        (filtroRapido === 'prioridade_alta' && (p.prioridade === 'Alta' || p.prioridade === 'Muito Alta'));
+
+      return casaBusca && casaResponsavel && casaPrioridade && casaMinhasDemandas && casaFiltroRapido;
     });
-  }, [processos, busca, responsavelFiltro, prioridadeFiltro, somenteMinhasDemandas, usuarioAtualId]);
+  }, [
+    processos,
+    busca,
+    responsavelFiltro,
+    prioridadeFiltro,
+    somenteMinhasDemandas,
+    usuarioAtualId,
+    filtroRapido,
+  ]);
+
+  const alternarEtapa = (chave: EtapaAberta) => {
+    setEtapasRecolhidas((prev) => {
+      const proximo = new Set(prev);
+      if (proximo.has(chave)) proximo.delete(chave);
+      else proximo.add(chave);
+      return proximo;
+    });
+  };
+
+  const expandirTodas = () => setEtapasRecolhidas(new Set());
+  const recolherTodas = () => setEtapasRecolhidas(new Set(ETAPAS.map((e) => e.chave)));
 
   const porEtapa = useMemo(() => {
     const mapa = new Map<EtapaAberta, Processo[]>();
@@ -200,85 +263,216 @@ export function Processos({
   return (
     <div className="space-y-4">
       {/* -------------------------------------------------------- ferramentas */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="relative min-w-56 flex-1">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="search"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Procurar por SEI, objeto, status, AUDESP ou PNCP…"
-            aria-label="Procurar processos"
-            className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-3 text-base focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
-          />
-        </div>
-        <select
-          value={responsavelFiltro}
-          onChange={(e) => setResponsavelFiltro(e.target.value)}
-          aria-label="Filtrar por responsável"
-          className={classeFiltro}
-        >
-          <option value="">Todos os responsáveis</option>
-          {usuarios.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.nome}
-            </option>
-          ))}
-        </select>
-        <select
-          value={prioridadeFiltro}
-          onChange={(e) => setPrioridadeFiltro(e.target.value)}
-          aria-label="Filtrar por prioridade"
-          className={classeFiltro}
-        >
-          <option value="">Todas as prioridades</option>
-          {PRIORIDADES.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        <Botao
-          aparencia={somenteMinhasDemandas ? 'primario' : 'neutro'}
-          icone={<UserCheck className="size-4" />}
-          onClick={() => aoMudarMinhasDemandas(!somenteMinhasDemandas)}
-          aria-pressed={somenteMinhasDemandas}
-          title={somenteMinhasDemandas ? 'Mostrar todos os processos' : 'Mostrar somente processos atribuídos a mim'}
-        >
-          Minhas Demandas
-        </Botao>
-        {/* Exportar é leitura: quem tem perfil de Leitor também precisa levar
-            a planilha para uma reunião, então o botão não depende do perfil. */}
-        <Botao
-          aparencia="neutro"
-          icone={<FileSpreadsheet className="size-4" />}
-          onClick={exportar}
-          carregando={exportando}
-          disabled={filtrados.length === 0}
-          title={
-            filtrados.length === 0
-              ? 'Não há processos na tela para exportar'
-              : `Baixar em Excel os ${filtrados.length} processos que estão na tela`
-          }
-        >
-          Exportar Excel
-        </Botao>
-
-        {podeEditar && (
-          <Botao aparencia="primario" icone={<Plus className="size-4" />} onClick={abrirNovo}>
-            Novo processo
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-56 flex-1">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Procurar por SEI, objeto, status, AUDESP ou PNCP…"
+              aria-label="Procurar processos"
+              className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-3 text-sm focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
+            />
+          </div>
+          <select
+            value={responsavelFiltro}
+            onChange={(e) => setResponsavelFiltro(e.target.value)}
+            aria-label="Filtrar por responsável"
+            className={classeFiltro}
+          >
+            <option value="">Todos os responsáveis</option>
+            {usuarios.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.nome}
+              </option>
+            ))}
+          </select>
+          <select
+            value={prioridadeFiltro}
+            onChange={(e) => setPrioridadeFiltro(e.target.value)}
+            aria-label="Filtrar por prioridade"
+            className={classeFiltro}
+          >
+            <option value="">Todas as prioridades</option>
+            {PRIORIDADES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+          <Botao
+            aparencia={somenteMinhasDemandas ? 'primario' : 'neutro'}
+            icone={<UserCheck className="size-4" />}
+            onClick={() => aoMudarMinhasDemandas(!somenteMinhasDemandas)}
+            aria-pressed={somenteMinhasDemandas}
+            title={somenteMinhasDemandas ? 'Mostrar todos os processos' : 'Mostrar somente processos atribuídos a mim'}
+          >
+            Minhas Demandas
           </Botao>
-        )}
+          <Botao
+            aparencia="neutro"
+            icone={<FileSpreadsheet className="size-4" />}
+            onClick={exportar}
+            carregando={exportando}
+            disabled={filtrados.length === 0}
+            title={
+              filtrados.length === 0
+                ? 'Não há processos na tela para exportar'
+                : `Baixar em Excel os ${filtrados.length} processos que estão na tela`
+            }
+          >
+            Exportar Excel
+          </Botao>
+
+          {podeEditar && (
+            <Botao aparencia="primario" icone={<Plus className="size-4" />} onClick={abrirNovo}>
+              Novo processo
+            </Botao>
+          )}
+        </div>
+
+        {/* Chips de filtros rápidos com contadores dinâmicos */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="mr-1 hidden font-semibold text-slate-500 sm:inline">Filtro rápido:</span>
+
+            <button
+              type="button"
+              onClick={() => setFiltroRapido('todos')}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+                filtroRapido === 'todos'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80'
+              }`}
+            >
+              <span>Todos</span>
+              <span
+                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                  filtroRapido === 'todos' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-700'
+                }`}
+              >
+                {contadores.todos}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroRapido(filtroRapido === 'atrasados' ? 'todos' : 'atrasados')}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+                filtroRapido === 'atrasados'
+                  ? 'bg-red-600 text-white shadow-xs ring-2 ring-red-300'
+                  : contadores.atrasados > 0
+                    ? 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-100'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200/80'
+              }`}
+            >
+              <AlertTriangle className="size-3.5" />
+              <span>Atrasados</span>
+              <span
+                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                  filtroRapido === 'atrasados'
+                    ? 'bg-red-700 text-white'
+                    : contadores.atrasados > 0
+                      ? 'bg-red-200 text-red-800'
+                      : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {contadores.atrasados}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroRapido(filtroRapido === 'emenda' ? 'todos' : 'emenda')}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+                filtroRapido === 'emenda'
+                  ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-300'
+                  : 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100'
+              }`}
+            >
+              <span>Com Emenda</span>
+              <span
+                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                  filtroRapido === 'emenda' ? 'bg-emerald-700 text-white' : 'bg-emerald-200 text-emerald-900'
+                }`}
+              >
+                {contadores.emenda}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroRapido(filtroRapido === 'prioridade_alta' ? 'todos' : 'prioridade_alta')}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+                filtroRapido === 'prioridade_alta'
+                  ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-300'
+                  : 'bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              <span>Prioridade Alta</span>
+              <span
+                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                  filtroRapido === 'prioridade_alta' ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-900'
+                }`}
+              >
+                {contadores.prioridadeAlta}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {filtrando && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBusca('');
+                  setResponsavelFiltro('');
+                  setPrioridadeFiltro('');
+                  setFiltroRapido('todos');
+                  aoMudarMinhasDemandas(false);
+                }}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              >
+                <X className="size-3.5" />
+                Limpar filtros
+              </button>
+            )}
+
+            <div className="flex items-center gap-1 border-l border-slate-200 pl-2 text-xs text-slate-500">
+              <button
+                type="button"
+                onClick={expandirTodas}
+                className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-800"
+                title="Expandir todas as fases"
+              >
+                Expandir todas
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={recolherTodas}
+                className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-800"
+                title="Recolher todas as fases"
+              >
+                Recolher todas
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <p className="px-1 text-sm text-slate-600">
-        <strong className="text-slate-900">{filtrados.length}</strong>{' '}
-        {filtrados.length === 1 ? 'processo em andamento' : 'processos em andamento'}
-        {filtrando && ' (com os filtros aplicados)'} ·{' '}
-        {podeEditar
-          ? 'clique em qualquer célula para editar; o número do SEI se copia com um clique.'
-          : 'seu acesso é somente para consulta; o número do SEI se copia com um clique.'}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-600">
+        <p>
+          <strong className="text-slate-900">{filtrados.length}</strong>{' '}
+          {filtrados.length === 1 ? 'processo em andamento' : 'processos em andamento'}
+          {filtrando && ' (com filtros aplicados)'} ·{' '}
+          {podeEditar
+            ? 'clique em qualquer célula para editar; o número do SEI se copia com um clique.'
+            : 'seu acesso é somente para consulta; o número do SEI se copia com um clique.'}
+        </p>
+      </div>
 
       {falhaAoSalvar && <AvisoErro mensagem={falhaAoSalvar} />}
 
@@ -300,8 +494,6 @@ export function Processos({
         </div>
       )}
 
-      {/* A linha sumiu do meio de uma planilha longa: sem este aviso, quem
-          apagou não tem como saber se o clique valeu. */}
       {apagado && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-800">
           <Trash2 className="size-4 shrink-0" />
@@ -345,89 +537,96 @@ export function Processos({
       )}
 
       {/* ----------------------------------------------------------- planilha */}
-      <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
         <div className="rolagem-suave overflow-x-auto">
-          <table className="w-full min-w-[1780px] table-fixed border-collapse text-left text-[13px]">
+          <table className="w-full min-w-[1360px] table-fixed border-collapse text-left text-[12.5px]">
             <colgroup>
-              <col className="w-[10.5%]" />
-              <col className="w-[9%]" />
-              <col className="w-[9%]" />
-              <col className="w-[5.5%]" />
-              <col className="w-[6.5%]" />
-              <col className="w-[6.5%]" />
-              <col className="w-[10%]" />
-              <col className="w-[7.5%]" />
-              <col className="w-[7.5%]" />
-              <col className="w-[9%]" />
-              <col className="w-[9%]" />
-              <col className="w-[5%]" />
+              <col className="w-[12%]" />  {/* SEI */}
+              <col className="w-[18%]" />  {/* Objeto e Setor */}
+              <col className="w-[8.5%]" /> {/* Modalidade */}
+              <col className="w-[6%]" />   {/* Emenda */}
+              <col className="w-[11.5%]" />{/* Publicações (AUDESP / PNCP) */}
+              <col className="w-[16%]" />  {/* Status */}
+              <col className="w-[10.5%]" />{/* Prazo */}
+              <col className="w-[7.5%]" /> {/* Prioridade */}
+              <col className="w-[12%]" />  {/* Responsáveis */}
+              <col className="w-[5.5%]" />  {/* Ações */}
             </colgroup>
             <thead>
-              <tr className="bg-slate-800 text-[10.5px] uppercase tracking-wide text-white">
-                {[
-                  'SEI',
-                  'Objeto',
-                  'Modalidade',
-                  'Emenda',
-                  'AUDESP',
-                  'PNCP',
-                  'Status',
-                  'Prioridade',
-                  'Responsável',
-                  '2º responsável',
-                  'Mover para',
-                  'Ações',
-                ].map((titulo) => (
-                  <th
-                    key={titulo}
-                    className="whitespace-nowrap border-r border-slate-600 px-1.5 py-2.5 font-bold last:border-r-0"
-                  >
-                    {titulo}
-                  </th>
-                ))}
+              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                <th className="px-3 py-2.5 font-bold">SEI</th>
+                <th className="px-3 py-2.5 font-bold">Objeto / Setor</th>
+                <th className="px-3 py-2.5 font-bold">Modalidade</th>
+                <th className="px-3 py-2.5 text-center font-bold">Emenda</th>
+                <th className="px-3 py-2.5 font-bold">Publicações</th>
+                <th className="px-3 py-2.5 font-bold">Status</th>
+                <th className="px-3 py-2.5 font-bold">Prazo</th>
+                <th className="px-3 py-2.5 font-bold">Prioridade</th>
+                <th className="px-3 py-2.5 font-bold">Responsáveis</th>
+                <th className="px-3 py-2.5 text-center font-bold">Ações</th>
               </tr>
             </thead>
 
             <tbody>
               {ETAPAS.map((etapa) => {
                 const itens = porEtapa.get(etapa.chave) ?? [];
+                const estaRecolhido = etapasRecolhidas.has(etapa.chave);
+
                 return (
                   <Fragment key={etapa.chave}>
-                    {/* Faixa da fase, como na planilha */}
-                    <tr>
+                    {/* Cabeçalho da fase discreto em slate suave com Accordion */}
+                    <tr className="border-t border-slate-200">
                       <th
                         colSpan={COLUNAS_DA_TABELA}
                         scope="colgroup"
-                        className="border-y border-slate-700 bg-slate-900 px-3 py-1.5 text-center
-                          text-[12px] font-extrabold uppercase tracking-wider text-amber-300"
+                        onClick={() => alternarEtapa(etapa.chave)}
+                        className="group cursor-pointer select-none border-y border-slate-200 bg-slate-100/80 px-3 py-2 text-left transition-colors hover:bg-slate-200/70"
                       >
-                        {etapa.faixa}
-                        <span className="ml-2 font-semibold text-amber-200/70">
-                          ({itens.length})
-                        </span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="flex size-5 items-center justify-center rounded text-slate-500 transition-colors group-hover:text-slate-800">
+                              {estaRecolhido ? (
+                                <ChevronRight className="size-4" />
+                              ) : (
+                                <ChevronDown className="size-4" />
+                              )}
+                            </span>
+                            <span className="text-[12px] font-bold uppercase tracking-wider text-slate-800">
+                              {etapa.faixa}
+                            </span>
+                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-2xs">
+                              {itens.length} {itens.length === 1 ? 'processo' : 'processos'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-medium text-slate-400 group-hover:text-slate-600">
+                            {estaRecolhido ? 'Clique para expandir' : 'Clique para recolher'}
+                          </span>
+                        </div>
                       </th>
                     </tr>
 
-                    {itens.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={COLUNAS_DA_TABELA}
-                          className="border-b border-slate-200 px-3 py-2 text-center text-xs text-slate-400"
-                        >
-                          {filtrando ? 'Nada encontrado nesta fase' : 'Nenhum processo nesta fase'}
-                        </td>
-                      </tr>
-                    ) : (
-                      itens.map((p) => (
-                        <LinhaProcesso
-                          key={p.id}
-                          processo={p}
-                          usuarios={usuarios}
-                          aoAjustar={ajustar}
-                          aoConcluir={() => setParaConcluir(p)}
-                          aoEditar={() => abrirEdicao(p)}
-                        />
-                      ))
+                    {!estaRecolhido && (
+                      itens.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={COLUNAS_DA_TABELA}
+                            className="border-b border-slate-200 px-3 py-3 text-center text-xs text-slate-400"
+                          >
+                            {filtrando ? 'Nenhum processo encontrado nesta fase com os filtros aplicados' : 'Nenhum processo nesta fase'}
+                          </td>
+                        </tr>
+                      ) : (
+                        itens.map((p) => (
+                          <LinhaProcesso
+                            key={p.id}
+                            processo={p}
+                            usuarios={usuarios}
+                            aoAjustar={ajustar}
+                            aoConcluir={() => setParaConcluir(p)}
+                            aoEditar={() => abrirEdicao(p)}
+                          />
+                        ))
+                      )
                     )}
                   </Fragment>
                 );
@@ -473,8 +672,18 @@ export function Processos({
 }
 
 // -----------------------------------------------------------------------------
-// Uma linha da planilha
+// Componentes de linha e células com edição limpa
 // -----------------------------------------------------------------------------
+
+/** Próxima etapa no fluxo sequencial comum. */
+const PROXIMA_ETAPA: Record<EtapaAberta, Etapa> = {
+  CSA: 'CSF',
+  CSF: 'Acompanhamento',
+  Acompanhamento: 'Execução/Entrega',
+  'Execução/Entrega': 'AUDESP/PNCP',
+  'AUDESP/PNCP': 'Concluído',
+  Outros: 'Concluído',
+};
 
 function LinhaProcesso({
   processo,
@@ -491,184 +700,722 @@ function LinhaProcesso({
 }) {
   const podeEditar = usePodeEditar();
   const dias = processo.dias_para_prazo ?? null;
-  const tomPrazo = tomDoPrazoTarefa(dias);
-  const corPrazo =
-    tomPrazo === 'vermelho'
-      ? 'text-red-700'
-      : tomPrazo === 'ambar'
-        ? 'text-amber-700'
-        : 'text-emerald-700';
+  const estaAtrasado = dias !== null && dias < 0;
 
-  const pessoas = usuarios.map((u) => ({ valor: String(u.id), texto: u.nome }));
-  const celula = 'border-b border-r border-slate-200 px-2 py-1.5 align-top last:border-r-0';
+  const celula = 'border-b border-slate-200 px-3 py-2 align-top transition-colors';
+  const linhaDestaque = estaAtrasado
+    ? 'border-l-4 border-l-red-500 bg-red-50/20 hover:bg-red-50/40'
+    : 'border-l-4 border-l-transparent bg-white hover:bg-slate-50/80';
 
   return (
-    <tr className="bg-white hover:bg-marca-50/60">
-      {/* SEI */}
+    <tr className={linhaDestaque}>
+      {/* 1. SEI */}
       <td className={celula}>
         {processo.sei ? (
           <BotaoCopiar
             texto={processo.sei}
-            rotulo="Copiar o número do processo"
-            className="w-full font-mono text-[11px] text-slate-700"
+            rotulo="Copiar número do processo"
+            className="w-full font-mono text-[11.5px] font-medium text-slate-800"
           />
         ) : (
           <span className="px-1 text-slate-300">—</span>
         )}
       </td>
 
-      {/* Objeto */}
+      {/* 2. Objeto e Setor */}
       <td className={celula}>
-        <p className="px-1 font-semibold leading-snug text-slate-900">{processo.objeto}</p>
-        {processo.setor_sigla && (
-          <p className="px-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">
-            {processo.setor_sigla}
-          </p>
-        )}
+        <div className="space-y-1">
+          <p className="font-semibold leading-snug text-slate-900">{processo.objeto}</p>
+          {processo.setor_sigla && (
+            <span
+              title={processo.setor_nome ?? undefined}
+              className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-slate-700 ring-1 ring-inset ring-slate-200"
+            >
+              {processo.setor_sigla}
+            </span>
+          )}
+        </div>
       </td>
 
-      {/* Modalidade */}
+      {/* 3. Modalidade */}
       <td className={celula}>
         <SelecaoNaLinha
           rotulo="Modalidade"
           valor={processo.modalidade ?? ''}
           opcoes={MODALIDADES.map((m) => ({ valor: m, texto: m }))}
           aoMudar={(v) => aoAjustar(processo, { modalidade: (v || null) as Modalidade | null })}
-          className="text-[11px] font-semibold text-slate-700"
+          className="text-[11.5px] font-medium text-slate-700"
         />
       </td>
 
-      {/* Emenda */}
+      {/* 4. Emenda */}
+      <td className={`${celula} text-center`}>
+        {podeEditar ? (
+          <button
+            type="button"
+            onClick={() => aoAjustar(processo, { emenda: processo.emenda === 1 ? 0 : 1 })}
+            title={processo.emenda === 1 ? 'Clique para remover recurso de emenda' : 'Clique para marcar como recurso de emenda'}
+            className="inline-flex items-center justify-center rounded transition-transform hover:scale-105"
+          >
+            {processo.emenda === 1 ? (
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                Emenda
+              </span>
+            ) : (
+              <span className="text-slate-300 hover:text-slate-500">—</span>
+            )}
+          </button>
+        ) : processo.emenda === 1 ? (
+          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+            Emenda
+          </span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+
+      {/* 5. Publicações (AUDESP / PNCP unificados) */}
       <td className={celula}>
-        <SelecaoNaLinha
-          rotulo="Usa recurso de emenda"
-          valor={processo.emenda === 1 ? '1' : '0'}
-          semVazio
-          opcoes={[
-            { valor: '0', texto: '—' },
-            { valor: '1', texto: 'Emenda' },
-          ]}
-          aoMudar={(v) => aoAjustar(processo, { emenda: v === '1' ? 1 : 0 })}
-          className={
-            processo.emenda === 1
-              ? 'text-[11px] font-bold text-emerald-700'
-              : 'text-[11px] text-slate-300'
-          }
+        <CelulaPublicacoes
+          processo={processo}
+          podeEditar={podeEditar}
+          aoAjustar={aoAjustar}
         />
       </td>
 
-      {/* AUDESP */}
-      <td className={celula}>
-        <TextoEditavel
-          valor={processo.audesp}
-          monoespacado
-          linhas={1}
-          aoSalvar={(v) => aoAjustar(processo, { audesp: v })}
-        />
-      </td>
-
-      {/* PNCP */}
-      <td className={celula}>
-        <TextoEditavel
-          valor={processo.pncp}
-          monoespacado
-          linhas={1}
-          aoSalvar={(v) => aoAjustar(processo, { pncp: v })}
-        />
-      </td>
-
-      {/* Status + prazo */}
+      {/* 6. Status */}
       <td className={celula}>
         <TextoEditavel
           valor={processo.status}
           aoSalvar={(v) => aoAjustar(processo, { status: v })}
-          className="text-[12.5px] text-slate-800"
+          className="text-[12px] text-slate-800"
         />
-        {processo.data_limite && (
-          <p className={`px-1.5 pt-0.5 text-[10.5px] font-semibold ${corPrazo}`}>
-            Prazo {dataBR(processo.data_limite)} · {textoPrazo(dias)}
-          </p>
-        )}
       </td>
 
-      {/* Prioridade */}
+      {/* 7. Prazo (separado do status com destaque visual claro) */}
+      <td className={celula}>
+        <CelulaPrazo
+          processo={processo}
+          dias={dias}
+          podeEditar={podeEditar}
+          aoAjustar={aoAjustar}
+        />
+      </td>
+
+      {/* 8. Prioridade */}
       <td className={celula}>
         <SelecaoNaLinha
           rotulo="Prioridade"
           valor={processo.prioridade}
           semVazio
           opcoes={PRIORIDADES.map((p) => ({ valor: p, texto: p }))}
-          aoMudar={(v) =>
-            aoAjustar(processo, { prioridade: (v || 'Baixa') as Prioridade })
-          }
-          className={`text-[11px] uppercase ${COR_PRIORIDADE[processo.prioridade]}`}
+          aoMudar={(v) => aoAjustar(processo, { prioridade: (v || 'Baixa') as Prioridade })}
+          className={`rounded-full px-2 py-0.5 text-[10.5px] uppercase ring-1 ring-inset ${COR_PRIORIDADE[processo.prioridade]}`}
         />
       </td>
 
-      {/* Responsável */}
+      {/* 9. Responsáveis (1º e 2º unificados) */}
       <td className={celula}>
-        <SelecaoNaLinha
-          rotulo="Responsável"
-          valor={processo.id_responsavel ? String(processo.id_responsavel) : ''}
-          opcoes={pessoas}
-          aoMudar={(v) => aoAjustar(processo, { id_responsavel: v ? Number(v) : null })}
-          className="text-[11.5px] text-slate-700"
+        <CelulaResponsaveis
+          processo={processo}
+          usuarios={usuarios}
+          podeEditar={podeEditar}
+          aoAjustar={aoAjustar}
         />
       </td>
 
-      {/* 2º responsável */}
-      <td className={celula}>
-        <SelecaoNaLinha
-          rotulo="Segundo responsável"
-          valor={processo.id_responsavel_2 ? String(processo.id_responsavel_2) : ''}
-          opcoes={pessoas}
-          aoMudar={(v) => aoAjustar(processo, { id_responsavel_2: v ? Number(v) : null })}
-          className="text-[11.5px] text-slate-700"
-        />
-      </td>
-
-      {/* Mover para outra fase */}
-      <td className={celula}>
-        {!podeEditar ? (
-          <span className="block px-1 py-1 text-center text-slate-300">—</span>
-        ) : (
-        <select
-          value=""
-          aria-label={`Mover ${processo.objeto} para outra fase`}
-          onChange={(e) => {
-            if (e.target.value === 'Concluído') aoConcluir();
-            else if (e.target.value) aoAjustar(processo, { etapa: e.target.value as Etapa });
-          }}
-          className="w-full cursor-pointer rounded border border-slate-300 bg-white px-1.5 py-1
-            text-[11.5px] font-semibold text-slate-700 hover:bg-slate-50
-            focus:border-marca-500 focus:outline-none"
-        >
-          <option value="">Mover para…</option>
-          {ETAPAS.filter((e) => e.chave !== processo.etapa).map((e) => (
-            <option key={e.chave} value={e.chave}>
-              {e.titulo}
-            </option>
-          ))}
-          <option value="Concluído">✓ Encerrar…</option>
-        </select>
-        )}
-      </td>
-
-      {/* Editar por completo */}
+      {/* 10. Ações compactas */}
       <td className={`${celula} text-center`}>
-        {podeEditar && (
-          <button
-            type="button"
-            onClick={aoEditar}
-            aria-label={`Editar o processo ${processo.objeto} por completo`}
-            title="Editar o processo por completo"
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-marca-50 hover:text-marca-700"
-          >
-            <Pencil className="size-4" />
-          </button>
-        )}
+        <MenuAcoesProcesso
+          processo={processo}
+          podeEditar={podeEditar}
+          aoAjustar={aoAjustar}
+          aoConcluir={aoConcluir}
+          aoEditar={aoEditar}
+        />
       </td>
     </tr>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Componente de Responsáveis Unificado
+// -----------------------------------------------------------------------------
+
+function CelulaResponsaveis({
+  processo,
+  usuarios,
+  podeEditar,
+  aoAjustar,
+}: {
+  processo: Processo;
+  usuarios: Usuario[];
+  podeEditar: boolean;
+  aoAjustar: (p: Processo, m: Partial<Processo>) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!aberto) return;
+    function aoClicarFora(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setAberto(false);
+      }
+    }
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAberto(false);
+    }
+    document.addEventListener('mousedown', aoClicarFora);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicarFora);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [aberto]);
+
+  const u1 = usuarios.find((u) => u.id === processo.id_responsavel);
+  const u2 = usuarios.find((u) => u.id === processo.id_responsavel_2);
+
+  const temResponsavel = Boolean(u1 || u2);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        disabled={!podeEditar}
+        onClick={() => podeEditar && setAberto((a) => !a)}
+        title={
+          podeEditar
+            ? temResponsavel
+              ? 'Clique para gerenciar responsáveis'
+              : 'Clique para atribuir responsável'
+            : undefined
+        }
+        className={`group flex w-full flex-col gap-1 rounded-md p-1 text-left transition-colors ${
+          podeEditar ? 'hover:bg-slate-100/80 cursor-pointer' : 'cursor-default'
+        }`}
+      >
+        {!temResponsavel ? (
+          <span className="text-slate-300 group-hover:text-slate-500">—</span>
+        ) : (
+          <>
+            {u1 && (
+              <div className="flex items-center gap-1.5" title={`Responsável: ${u1.nome}`}>
+                <Avatar nome={u1.nome} tamanho="pequeno" />
+                <span className="max-w-[110px] truncate text-[11px] font-medium text-slate-800">
+                  {u1.nome}
+                </span>
+              </div>
+            )}
+            {u2 && (
+              <div className="flex items-center gap-1.5" title={`2º Responsável: ${u2.nome}`}>
+                <Avatar nome={u2.nome} tamanho="pequeno" />
+                <span className="max-w-[110px] truncate text-[10.5px] text-slate-500">
+                  {u2.nome}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+      </button>
+
+      {/* Popover flutuante para atribuir 1º e 2º responsável independentes */}
+      {aberto && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 space-y-3 rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-xl ring-1 ring-black/5 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="font-bold text-slate-800">Definir Responsáveis</span>
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              className="rounded p-0.5 text-slate-400 hover:text-slate-600"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+              1º Responsável (Titular)
+            </label>
+            <select
+              value={processo.id_responsavel ?? ''}
+              onChange={(e) =>
+                aoAjustar(processo, {
+                  id_responsavel: e.target.value ? Number(e.target.value) : null,
+                })
+              }
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-marca-500 focus:outline-none"
+            >
+              <option value="">Sem responsável</option>
+              {usuarios.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+              2º Responsável (Apoio)
+            </label>
+            <select
+              value={processo.id_responsavel_2 ?? ''}
+              onChange={(e) =>
+                aoAjustar(processo, {
+                  id_responsavel_2: e.target.value ? Number(e.target.value) : null,
+                })
+              }
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-marca-500 focus:outline-none"
+            >
+              <option value="">Nenhum</option>
+              {usuarios.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              className="rounded bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+            >
+              Pronto
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Componente de Publicações (AUDESP e PNCP unificados)
+// -----------------------------------------------------------------------------
+
+function CelulaPublicacoes({
+  processo,
+  podeEditar,
+  aoAjustar,
+}: {
+  processo: Processo;
+  podeEditar: boolean;
+  aoAjustar: (p: Processo, m: Partial<Processo>) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [audesp, setAudesp] = useState(processo.audesp ?? '');
+  const [pncp, setPncp] = useState(processo.pncp ?? '');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setAudesp(processo.audesp ?? '');
+    setPncp(processo.pncp ?? '');
+  }, [processo.audesp, processo.pncp]);
+
+  useEffect(() => {
+    if (!aberto) return;
+    function aoClicarFora(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        salvar();
+      }
+    }
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAberto(false);
+      if (e.key === 'Enter') salvar();
+    }
+    document.addEventListener('mousedown', aoClicarFora);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicarFora);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [aberto, audesp, pncp]);
+
+  function salvar() {
+    setAberto(false);
+    const novoAudesp = audesp.trim() || null;
+    const novoPncp = pncp.trim() || null;
+    if (novoAudesp !== (processo.audesp ?? null) || novoPncp !== (processo.pncp ?? null)) {
+      aoAjustar(processo, { audesp: novoAudesp, pncp: novoPncp });
+    }
+  }
+
+  const temPublicacao = Boolean(processo.audesp || processo.pncp);
+
+  return (
+    <div className="relative" ref={ref}>
+      <div
+        onClick={() => podeEditar && setAberto(true)}
+        className={`group flex min-h-6 flex-col gap-1 rounded-md p-1 transition-colors ${
+          podeEditar ? 'hover:bg-slate-100/80 cursor-pointer' : 'cursor-default'
+        }`}
+        title={podeEditar ? 'Clique para editar AUDESP / PNCP' : undefined}
+      >
+        {!temPublicacao ? (
+          <span className="text-slate-300 group-hover:text-slate-500">—</span>
+        ) : (
+          <>
+            {processo.audesp && (
+              <span className="inline-flex max-w-full items-center gap-1 truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+                <span className="font-bold text-slate-500">AUDESP:</span>
+                <span className="truncate">{processo.audesp}</span>
+              </span>
+            )}
+            {processo.pncp && (
+              <span className="inline-flex max-w-full items-center gap-1 truncate rounded bg-sky-50 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-sky-800 ring-1 ring-inset ring-sky-200">
+                <span className="font-bold text-sky-600">PNCP:</span>
+                <span className="truncate">{processo.pncp}</span>
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {aberto && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 space-y-3 rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-xl ring-1 ring-black/5 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="font-bold text-slate-800">Publicações e Registros</span>
+            <button
+              type="button"
+              onClick={salvar}
+              className="rounded p-0.5 text-slate-400 hover:text-slate-600"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+              Número AUDESP
+            </label>
+            <input
+              type="text"
+              value={audesp}
+              onChange={(e) => setAudesp(e.target.value)}
+              placeholder="Ex.: 46379400600012026"
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-xs text-slate-800 focus:border-marca-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+              Número PNCP
+            </label>
+            <input
+              type="text"
+              value={pncp}
+              onChange={(e) => setPncp(e.target.value)}
+              placeholder="Ex.: PNC.2024.00074585-59"
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-xs text-slate-800 focus:border-marca-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex justify-end gap-1.5 pt-1">
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              className="rounded px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={salvar}
+              className="rounded bg-marca-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-marca-700"
+            >
+              Salvar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Componente de Prazo com Apresentação Visual Clara
+// -----------------------------------------------------------------------------
+
+function CelulaPrazo({
+  processo,
+  dias,
+  podeEditar,
+  aoAjustar,
+}: {
+  processo: Processo;
+  dias: number | null;
+  podeEditar: boolean;
+  aoAjustar: (p: Processo, m: Partial<Processo>) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [data, setData] = useState(processo.data_limite ?? '');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setData(processo.data_limite ?? '');
+  }, [processo.data_limite]);
+
+  useEffect(() => {
+    if (!aberto) return;
+    function aoClicarFora(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setAberto(false);
+      }
+    }
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAberto(false);
+    }
+    document.addEventListener('mousedown', aoClicarFora);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicarFora);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [aberto]);
+
+  function salvar(novaData: string | null) {
+    setAberto(false);
+    if (novaData !== (processo.data_limite ?? null)) {
+      aoAjustar(processo, { data_limite: novaData });
+    }
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        disabled={!podeEditar}
+        onClick={() => podeEditar && setAberto((a) => !a)}
+        title={podeEditar ? 'Clique para ajustar a data limite' : undefined}
+        className={`group flex w-full flex-col gap-0.5 rounded-md p-1 text-left transition-colors ${
+          podeEditar ? 'hover:bg-slate-100/80 cursor-pointer' : 'cursor-default'
+        }`}
+      >
+        {processo.data_limite ? (
+          <>
+            <span className="font-semibold text-slate-800 text-[11.5px]">
+              {dataBR(processo.data_limite)}
+            </span>
+            {dias !== null && (
+              <span>
+                {dias < 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-300">
+                    <AlertTriangle className="size-3" />
+                    Atrasado há {Math.abs(dias)}d
+                  </span>
+                ) : dias === 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+                    <Clock className="size-3" />
+                    Vence hoje
+                  </span>
+                ) : dias <= 7 ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
+                    Vence em {dias}d
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+                    Faltam {dias}d
+                  </span>
+                )}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-slate-300 group-hover:text-slate-500">—</span>
+        )}
+      </button>
+
+      {aberto && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-56 space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-xl ring-1 ring-black/5 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="font-bold text-slate-800">Data Limite</span>
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              className="rounded p-0.5 text-slate-400 hover:text-slate-600"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+
+          <input
+            type="date"
+            value={data}
+            onChange={(e) => setData(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-800 focus:border-marca-500 focus:outline-none"
+          />
+
+          <div className="flex justify-between pt-1">
+            <button
+              type="button"
+              onClick={() => salvar(null)}
+              className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+            >
+              Remover prazo
+            </button>
+            <button
+              type="button"
+              onClick={() => salvar(data || null)}
+              className="rounded bg-marca-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-marca-700"
+            >
+              Salvar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Componente de Ações e Movimentação Contextual
+// -----------------------------------------------------------------------------
+
+function MenuAcoesProcesso({
+  processo,
+  podeEditar,
+  aoAjustar,
+  aoConcluir,
+  aoEditar,
+}: {
+  processo: Processo;
+  podeEditar: boolean;
+  aoAjustar: (p: Processo, m: Partial<Processo>) => void;
+  aoConcluir: () => void;
+  aoEditar: () => void;
+}) {
+  const [menuAberto, setMenuAberto] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuAberto) return;
+    function aoClicarFora(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setMenuAberto(false);
+      }
+    }
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuAberto(false);
+    }
+    document.addEventListener('mousedown', aoClicarFora);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicarFora);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [menuAberto]);
+
+  const proximaEtapa = PROXIMA_ETAPA[processo.etapa as EtapaAberta];
+
+  if (!podeEditar) {
+    return <span className="text-slate-300">—</span>;
+  }
+
+  return (
+    <div className="relative inline-flex items-center gap-1" ref={ref}>
+      {/* Botão de Avanço Rápido inequívoco */}
+      {proximaEtapa && (
+        <button
+          type="button"
+          onClick={() => {
+            if (proximaEtapa === 'Concluído') aoConcluir();
+            else aoAjustar(processo, { etapa: proximaEtapa });
+          }}
+          title={
+            proximaEtapa === 'Concluído'
+              ? 'Encerrar este processo'
+              : `Avançar para a fase: ${proximaEtapa}`
+          }
+          className="rounded-lg p-1 text-slate-500 hover:bg-marca-50 hover:text-marca-700 transition-colors"
+        >
+          {proximaEtapa === 'Concluído' ? (
+            <Check className="size-4 text-emerald-600" />
+          ) : (
+            <ArrowRight className="size-4" />
+          )}
+        </button>
+      )}
+
+      {/* Botão de Edição Completa */}
+      <button
+        type="button"
+        onClick={aoEditar}
+        aria-label={`Editar o processo ${processo.objeto}`}
+        title="Editar processo completo"
+        className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+      >
+        <Pencil className="size-3.5" />
+      </button>
+
+      {/* Menu Contextual de 3 Pontos */}
+      <button
+        type="button"
+        onClick={() => setMenuAberto((a) => !a)}
+        aria-label="Mais opções de movimentação"
+        title="Mover para outra fase ou encerrar"
+        className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+      >
+        <MoreHorizontal className="size-3.5" />
+      </button>
+
+      {/* Menu suspenso */}
+      {menuAberto && (
+        <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-xl border border-slate-200 bg-white py-1.5 text-xs shadow-xl ring-1 ring-black/5 animate-in fade-in zoom-in-95">
+          <div className="px-3 py-1 font-bold text-slate-400 uppercase tracking-wider text-[10px]">
+            Mover para:
+          </div>
+
+          {ETAPAS.filter((e) => e.chave !== processo.etapa).map((e) => (
+            <button
+              key={e.chave}
+              type="button"
+              onClick={() => {
+                setMenuAberto(false);
+                aoAjustar(processo, { etapa: e.chave });
+              }}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+            >
+              <span>{e.titulo}</span>
+              {e.chave === proximaEtapa && (
+                <span className="text-[10px] font-semibold text-marca-600">Sugerida</span>
+              )}
+            </button>
+          ))}
+
+          <div className="my-1 border-t border-slate-100" />
+
+          <button
+            type="button"
+            onClick={() => {
+              setMenuAberto(false);
+              aoConcluir();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            <Check className="size-3.5 text-emerald-600" />
+            <span>Encerrar processo…</span>
+          </button>
+
+          <div className="my-1 border-t border-slate-100" />
+
+          <button
+            type="button"
+            onClick={() => {
+              setMenuAberto(false);
+              aoEditar();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-600 hover:bg-slate-50"
+          >
+            <Pencil className="size-3.5 text-slate-400" />
+            <span>Editar completo</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

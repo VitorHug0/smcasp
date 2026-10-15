@@ -537,75 +537,51 @@ export function Processos({
       )}
 
       {/* ----------------------------------------------------------- planilha */}
-      <div
-        tabIndex={0}
-        role="region"
-        aria-label="Tabela de processos com cabeçalho fixo"
-        className="rolagem-suave max-h-[calc(100vh-13.5rem)] min-h-[460px] overflow-auto rounded-xl border border-slate-200 bg-white shadow-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-marca-500"
-      >
-        <table className="w-full min-w-[1360px] table-fixed border-separate border-spacing-0 text-left text-[12.5px]">
-          <colgroup>
-            <col className="w-[12%]" />  {/* SEI */}
-            <col className="w-[18%]" />  {/* Objeto e Setor */}
-            <col className="w-[8.5%]" /> {/* Modalidade */}
-            <col className="w-[6%]" />   {/* Emenda */}
-            <col className="w-[11.5%]" />{/* Publicações (AUDESP / PNCP) */}
-            <col className="w-[16%]" />  {/* Status */}
-            <col className="w-[10.5%]" />{/* Prazo */}
-            <col className="w-[7.5%]" /> {/* Prioridade */}
-            <col className="w-[12%]" />  {/* Responsáveis */}
-            <col className="w-[5.5%]" />  {/* Ações */}
-          </colgroup>
-          <thead className="sticky top-0 z-20 bg-slate-50">
-            <tr className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                SEI
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Objeto / Setor
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Modalidade
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-center font-bold shadow-xs">
-                Emenda
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Publicações
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Status
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Prazo
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Prioridade
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 font-bold shadow-xs">
-                Responsáveis
-              </th>
-              <th className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 px-3 py-2.5 text-center font-bold shadow-xs">
-                Ações
-              </th>
-            </tr>
-          </thead>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+        <div className="rolagem-suave overflow-x-auto">
+          <table className="w-full min-w-[1360px] table-fixed border-collapse text-left text-[12.5px]">
+            <colgroup>
+              <col className="w-[12%]" />  {/* SEI */}
+              <col className="w-[18%]" />  {/* Objeto e Setor */}
+              <col className="w-[8.5%]" /> {/* Modalidade */}
+              <col className="w-[6%]" />   {/* Emenda */}
+              <col className="w-[11.5%]" />{/* Publicações (AUDESP / PNCP) */}
+              <col className="w-[16%]" />  {/* Status */}
+              <col className="w-[10.5%]" />{/* Prazo */}
+              <col className="w-[7.5%]" /> {/* Prioridade */}
+              <col className="w-[12%]" />  {/* Responsáveis */}
+              <col className="w-[5.5%]" />  {/* Ações */}
+            </colgroup>
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                <th className="px-3 py-2.5 font-bold">SEI</th>
+                <th className="px-3 py-2.5 font-bold">Objeto / Setor</th>
+                <th className="px-3 py-2.5 font-bold">Modalidade</th>
+                <th className="px-3 py-2.5 text-center font-bold">Emenda</th>
+                <th className="px-3 py-2.5 font-bold">Publicações</th>
+                <th className="px-3 py-2.5 font-bold">Status</th>
+                <th className="px-3 py-2.5 font-bold">Prazo</th>
+                <th className="px-3 py-2.5 font-bold">Prioridade</th>
+                <th className="px-3 py-2.5 font-bold">Responsáveis</th>
+                <th className="px-3 py-2.5 text-center font-bold">Ações</th>
+              </tr>
+            </thead>
 
-          <tbody>
-            {ETAPAS.map((etapa) => {
-              const itens = porEtapa.get(etapa.chave) ?? [];
-              const estaRecolhido = etapasRecolhidas.has(etapa.chave);
+            <tbody>
+              {ETAPAS.map((etapa) => {
+                const itens = porEtapa.get(etapa.chave) ?? [];
+                const estaRecolhido = etapasRecolhidas.has(etapa.chave);
 
-              return (
-                <Fragment key={etapa.chave}>
-                  {/* Cabeçalho da fase discreto em slate suave com Accordion, fixo abaixo das colunas */}
-                  <tr className="border-t border-slate-200">
-                    <th
-                      colSpan={COLUNAS_DA_TABELA}
-                      scope="colgroup"
-                      onClick={() => alternarEtapa(etapa.chave)}
-                      className="group sticky top-[37px] z-10 cursor-pointer select-none border-y border-slate-200 bg-slate-100/95 backdrop-blur-xs px-3 py-2 text-left transition-colors hover:bg-slate-200/90 shadow-2xs"
-                    >
+                return (
+                  <Fragment key={etapa.chave}>
+                    {/* Cabeçalho da fase discreto em slate suave com Accordion */}
+                    <tr className="border-t border-slate-200">
+                      <th
+                        colSpan={COLUNAS_DA_TABELA}
+                        scope="colgroup"
+                        onClick={() => alternarEtapa(etapa.chave)}
+                        className="group cursor-pointer select-none border-y border-slate-200 bg-slate-100/80 px-3 py-2 text-left transition-colors hover:bg-slate-200/70"
+                      >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="flex size-5 items-center justify-center rounded text-slate-500 transition-colors group-hover:text-slate-800">
@@ -658,6 +634,7 @@ export function Processos({
             </tbody>
           </table>
         </div>
+      </div>
 
       <ModalProcesso
         aberto={modalAberto}

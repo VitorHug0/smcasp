@@ -240,7 +240,9 @@ export const RECURSOS: Record<string, Recurso> = {
              s.nome  AS setor_nome,
              CASE WHEN p.data_limite IS NULL THEN NULL
                   ELSE CAST(julianday(p.data_limite) - julianday(date('now')) AS INTEGER)
-             END AS dias_para_prazo
+             END AS dias_para_prazo,
+             (SELECT COUNT(*) FROM processo_checklists WHERE id_processo = p.id) AS checklist_total,
+             (SELECT COUNT(*) FROM processo_checklists WHERE id_processo = p.id AND concluido = 1) AS checklist_concluidos
       FROM processos p
       LEFT JOIN usuarios u  ON u.id  = p.id_responsavel
       LEFT JOIN usuarios u2 ON u2.id = p.id_responsavel_2

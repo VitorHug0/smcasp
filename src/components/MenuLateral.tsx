@@ -1,4 +1,5 @@
 import {
+  CheckCircle2,
   ClipboardList,
   FileText,
   LayoutDashboard,
@@ -15,6 +16,7 @@ import { useAcesso } from '../lib/permissoes';
 
 export type Tela =
   | 'visao-geral'
+  | 'tarefas'
   | 'processos'
   | 'concluidos'
   | 'compras'
@@ -44,6 +46,13 @@ export const ITENS_MENU: ItemMenu[] = [
     explicacao: 'Os números do ano em uma tela só',
     Icone: LayoutDashboard,
     rota: '/',
+  },
+  {
+    chave: 'tarefas',
+    titulo: 'Tarefas',
+    explicacao: 'Minhas tarefas e listas pessoais',
+    Icone: CheckCircle2,
+    rota: '/tarefas',
   },
   {
     chave: 'processos',

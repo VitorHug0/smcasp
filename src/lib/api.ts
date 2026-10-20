@@ -20,6 +20,12 @@ import type {
   DesfechoProcesso,
   UsuarioAdmin,
   UsuarioSessao,
+  ListaTarefas,
+  Tarefa,
+  DadosCriarTarefa,
+  DadosAtualizarTarefa,
+  ProcessoChecklistItem,
+  ResumoChecklistProcesso,
 } from './types';
 
 export class ErroDaApi extends Error {
@@ -209,6 +215,28 @@ export const api = {
         method: 'POST',
         ...corpo({ desfecho, substituido_por: substituido_por?.trim() || null }),
       }),
+    checklist: {
+      obter: (id: number) => pedir<ResumoChecklistProcesso>(`/processos/${id}/checklist`),
+      ajustarItem: (
+        id: number,
+        itemId: number,
+        dados: { concluido?: boolean; titulo?: string; detalhes?: string },
+      ) =>
+        pedir<ProcessoChecklistItem>(`/processos/${id}/checklist/${itemId}`, {
+          method: 'PATCH',
+          ...corpo(dados),
+        }),
+      adicionarItem: (
+        id: number,
+        dados: { titulo: string; detalhes?: string; fase?: string; setor_responsavel?: string },
+      ) =>
+        pedir<ProcessoChecklistItem>(`/processos/${id}/checklist`, {
+          method: 'POST',
+          ...corpo(dados),
+        }),
+      excluirItem: (id: number, itemId: number) =>
+        pedir<{ ok: true }>(`/processos/${id}/checklist/${itemId}`, { method: 'DELETE' }),
+    },
   },
 
   compras: {
@@ -225,5 +253,41 @@ export const api = {
     criar: (d: Partial<Aquisicao>) =>
       pedir<Aquisicao>('/aquisicoes', { method: 'POST', ...corpo(d) }),
     excluir: (id: number) => pedir<void>(`/aquisicoes/${id}`, { method: 'DELETE' }),
+  },
+
+  tarefas: {
+    listarListas: () => pedir<ListaTarefas[]>('/tarefas/listas'),
+    criarLista: (titulo: string) =>
+      pedir<ListaTarefas>('/tarefas/listas', { method: 'POST', ...corpo({ titulo }) }),
+    alterarLista: (id: number, dados: { titulo?: string; ordem?: number }) =>
+      pedir<ListaTarefas>(`/tarefas/listas/${id}`, { method: 'PATCH', ...corpo(dados) }),
+    excluirLista: (id: number) => pedir<{ ok: true }>(`/tarefas/listas/${id}`, { method: 'DELETE' }),
+
+    listar: (filtros?: {
+      id_lista?: number;
+      com_estrela?: boolean;
+      concluida?: boolean;
+      busca?: string;
+    }) => {
+      const params = new URLSearchParams();
+      if (filtros?.id_lista) params.set('id_lista', String(filtros.id_lista));
+      if (filtros?.com_estrela !== undefined) {
+        params.set('com_estrela', filtros.com_estrela ? '1' : '0');
+      }
+      if (filtros?.concluida !== undefined) {
+        params.set('concluida', filtros.concluida ? '1' : '0');
+      }
+      if (filtros?.busca) params.set('busca', filtros.busca);
+      const qs = params.toString();
+      return pedir<Tarefa[]>(`/tarefas${qs ? `?${qs}` : ''}`);
+    },
+
+    criar: (dados: DadosCriarTarefa) =>
+      pedir<Tarefa>('/tarefas', { method: 'POST', ...corpo(dados) }),
+    ajustar: (id: number, dados: DadosAtualizarTarefa) =>
+      pedir<Tarefa>(`/tarefas/${id}`, { method: 'PATCH', ...corpo(dados) }),
+    excluir: (id: number) => pedir<{ ok: true }>(`/tarefas/${id}`, { method: 'DELETE' }),
+    limparConcluidas: (id_lista?: number) =>
+      pedir<{ ok: true }>('/tarefas/limpar-concluidas', { method: 'POST', ...corpo({ id_lista }) }),
   },
 };

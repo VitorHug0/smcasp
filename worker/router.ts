@@ -29,6 +29,8 @@ import { RECURSOS } from './recursos';
 import { MENSAGENS, sessaoDaRequisicao, tratarCadastro, tratarSessao } from './auth';
 import { tratarAdminUsuarios } from './admin';
 import { concluirProcessoComCompra, tratarCompras } from './compras';
+import { garantirChecklistInicial, tratarProcessoChecklist } from './processosChecklist';
+import { tratarTarefas } from './tarefas';
 import type { Contrato, DashboardData } from '../src/lib/types';
 
 /** Métodos que mexem nos dados. GET e HEAD são leitura e passam para todo mundo. */
@@ -61,6 +63,11 @@ export async function tratarApi(request: Request, env: Env): Promise<Response> {
     // cookie de 30 dias na mão.
     const usuario = await sessaoDaRequisicao(request, env);
     if (!usuario) return erro(MENSAGENS.semSessao, 401);
+
+    // Tarefas pessoais (estilo Google Tasks): cada usuário mexe nas suas próprias tarefas
+    if (partes[0] === 'tarefas') {
+      return await tratarTarefas(request, env, partes.slice(1), usuario);
+    }
 
     // Gestão de contas: só o administrador geral.
     if (partes[0] === 'admin') {
@@ -106,6 +113,12 @@ export async function tratarApi(request: Request, env: Env): Promise<Response> {
       const id = Number(partes[1]);
       if (!Number.isInteger(id) || id <= 0) return erro('Identificador inválido.', 400);
       return await concluirProcesso(request, env, id);
+    }
+
+    if (partes[0] === 'processos' && partes.length >= 3 && partes[2] === 'checklist') {
+      const id = Number(partes[1]);
+      if (!Number.isInteger(id) || id <= 0) return erro('Identificador inválido.', 400);
+      return await tratarProcessoChecklist(request, env, id, partes.slice(3), usuario);
     }
 
     const recurso = RECURSOS[partes[0]];
@@ -302,6 +315,9 @@ async function criar(env: Env, nome: string, request: Request): Promise<Response
   const { sql, valores } = montarInsert(recurso.tabela, limparNulos(dados));
   const criado = await env.DB.prepare(sql).bind(...valores).first<{ id: number }>();
   if (!criado) return erro('Não foi possível cadastrar o registro.', 500);
+  if (nome === 'processos') {
+    await garantirChecklistInicial(env, criado.id, (dados.modalidade as string) ?? null);
+  }
   return await obter(env, nome, criado.id);
 }
 

@@ -14,6 +14,7 @@ import { Botao } from './components/ui/Botao';
 import { Carregando, Falha } from './components/ui/Estados';
 import { Etiqueta } from './components/ui/Etiqueta';
 import { VisaoGeral } from './modules/VisaoGeral';
+import { Tarefas } from './modules/Tarefas';
 import { Processos } from './modules/Processos';
 import { Concluidos } from './modules/Concluidos';
 import { Compras } from './modules/Compras';
@@ -362,6 +363,9 @@ export default function App() {
                       aoAbrirCompras: () => irPara('/compras'),
                     }}
                   />
+                )}
+                {telaAtual.chave === 'tarefas' && (
+                  <Tarefas key={versao} />
                 )}
                 {telaAtual.chave === 'processos' && (
                   <Processos

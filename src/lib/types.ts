@@ -273,6 +273,8 @@ export interface Processo {
   setor_sigla?: string | null;
   setor_nome?: string | null;
   dias_para_prazo?: number | null;
+  checklist_total?: number;
+  checklist_concluidos?: number;
 }
 
 export interface Aquisicao {
@@ -361,4 +363,80 @@ export interface DashboardData {
 export interface ApiError {
   erro: string;
   detalhe?: string;
+}
+
+// -----------------------------------------------------------------------------
+// TAREFAS PESSOAIS (Estilo Google Tasks)
+// -----------------------------------------------------------------------------
+
+export interface ListaTarefas {
+  id: number;
+  id_usuario: number;
+  titulo: string;
+  ordem: number;
+  padrao: number;
+  criado_em: string;
+  total_pendentes: number;
+  total_concluidas: number;
+}
+
+export interface Tarefa {
+  id: number;
+  id_usuario: number;
+  id_lista: number;
+  titulo: string;
+  detalhes: string | null;
+  data_vencimento: string | null;
+  com_estrela: number;
+  concluida: number;
+  concluida_em: string | null;
+  ordem: number;
+  criado_em: string;
+  atualizado_em: string;
+  lista_titulo?: string;
+}
+
+export interface DadosCriarTarefa {
+  id_lista?: number;
+  titulo: string;
+  detalhes?: string | null;
+  data_vencimento?: string | null;
+  com_estrela?: boolean;
+}
+
+export interface DadosAtualizarTarefa {
+  titulo?: string;
+  detalhes?: string | null;
+  data_vencimento?: string | null;
+  com_estrela?: boolean;
+  concluida?: boolean;
+  id_lista?: number;
+  ordem?: number;
+}
+
+// -----------------------------------------------------------------------------
+// CHECKLIST DO PROCESSO
+// -----------------------------------------------------------------------------
+
+export interface ProcessoChecklistItem {
+  id: number;
+  id_processo: number;
+  chave_item: string;
+  titulo: string;
+  detalhes: string | null;
+  fase: string;
+  setor_responsavel: string | null;
+  concluido: number;
+  concluido_por_nome: string | null;
+  concluido_em: string | null;
+  ordem: number;
+  personalizado: number;
+  criado_em: string;
+}
+
+export interface ResumoChecklistProcesso {
+  itens: ProcessoChecklistItem[];
+  total: number;
+  concluidos: number;
+  modalidade: string;
 }

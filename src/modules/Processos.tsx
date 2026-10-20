@@ -11,13 +11,15 @@
 //  Concluídos.
 // =============================================================================
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   ArrowRight,
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Clock,
   FileSpreadsheet,
   FileUp,
@@ -51,6 +53,7 @@ import {
   validarFormularioCompra,
   type FormularioCompraEstado,
 } from '../components/compras/FormularioCompra';
+import { GavetaChecklistProcesso } from '../components/GavetaChecklistProcesso';
 import type { DesfechoProcesso, Etapa, EtapaAberta, Modalidade, Prioridade, Processo, Setor, Usuario } from '../lib/types';
 
 /** As faixas da planilha, na ordem em que o processo caminha. */
@@ -102,6 +105,16 @@ export function Processos({
   const [lista, setLista] = useState<Processo[] | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
   const [emEdicao, setEmEdicao] = useState<Processo | null>(null);
+
+  // Gaveta Lateral de Checklist do Processo (Slide-over)
+  const [processoChecklist, setProcessoChecklist] = useState<Processo | null>(null);
+
+  // Aviso Suave de Tramitação com Checklist Pendente
+  const [avisoTransicao, setAvisoTransicao] = useState<{
+    processo: Processo;
+    novaEtapa: Etapa;
+  } | null>(null);
+
   const [falhaAoSalvar, setFalhaAoSalvar] = useState<string | null>(null);
   const [concluido, setConcluido] = useState<{ objeto: string; desfecho?: DesfechoProcesso } | null>(null);
   const [paraConcluir, setParaConcluir] = useState<Processo | null>(null);
@@ -194,7 +207,7 @@ export function Processos({
     return mapa;
   }, [filtrados]);
 
-  async function ajustar(processo: Processo, mudanca: Partial<Processo>) {
+  async function executarAjuste(processo: Processo, mudanca: Partial<Processo>) {
     const anterior = processos;
     setFalhaAoSalvar(null);
 
@@ -214,6 +227,44 @@ export function Processos({
       setFalhaAoSalvar(e instanceof ErroDaApi ? e.message : 'Não foi possível salvar a alteração.');
     }
   }
+
+  async function ajustar(processo: Processo, mudanca: Partial<Processo>) {
+    // Aviso suave ao tentar mover de etapa quando ainda há itens pendentes no checklist
+    if (mudanca.etapa && mudanca.etapa !== processo.etapa) {
+      const total = processo.checklist_total ?? 0;
+      const concluidos = processo.checklist_concluidos ?? 0;
+      if (total > 0 && concluidos < total) {
+        setAvisoTransicao({
+          processo,
+          novaEtapa: mudanca.etapa,
+        });
+        return;
+      }
+    }
+    await executarAjuste(processo, mudanca);
+  }
+
+  const atualizarProgressoChecklist = useCallback(
+    (idProcesso: number, concluidos: number, total: number) => {
+      setLista((atual) => {
+        if (!atual) return atual;
+        const index = atual.findIndex((p) => p.id === idProcesso);
+        if (index === -1) return atual;
+        const item = atual[index];
+        if (item.checklist_concluidos === concluidos && item.checklist_total === total) {
+          return atual;
+        }
+        const nova = [...atual];
+        nova[index] = { ...item, checklist_concluidos: concluidos, checklist_total: total };
+        return nova;
+      });
+    },
+    [],
+  );
+
+  const fecharChecklist = useCallback(() => {
+    setProcessoChecklist(null);
+  }, []);
 
   function abrirNovo() {
     setEmEdicao(null);
@@ -539,31 +590,33 @@ export function Processos({
       {/* ----------------------------------------------------------- planilha */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
         <div className="rolagem-suave overflow-x-auto">
-          <table className="w-full min-w-[1360px] table-fixed border-collapse text-left text-[12.5px]">
+          <table className="w-full table-fixed border-collapse text-left text-[12px]">
             <colgroup>
-              <col className="w-[12%]" />  {/* SEI */}
-              <col className="w-[18%]" />  {/* Objeto e Setor */}
-              <col className="w-[8.5%]" /> {/* Modalidade */}
-              <col className="w-[6%]" />   {/* Emenda */}
-              <col className="w-[11.5%]" />{/* Publicações (AUDESP / PNCP) */}
-              <col className="w-[16%]" />  {/* Status */}
-              <col className="w-[10.5%]" />{/* Prazo */}
-              <col className="w-[7.5%]" /> {/* Prioridade */}
-              <col className="w-[12%]" />  {/* Responsáveis */}
-              <col className="w-[5.5%]" />  {/* Ações */}
+              <col className="w-[125px]" />  {/* 1. SEI */}
+              <col className="w-[20%] min-w-[170px]" /> {/* 2. Objeto e Setor */}
+              <col className="w-[85px]" />   {/* 3. Modalidade */}
+              <col className="w-[50px]" />   {/* 4. Emenda */}
+              <col className="w-[105px]" />  {/* 5. Publicações */}
+              <col className="w-[18%] min-w-[130px]" /> {/* 6. Status */}
+              <col className="w-[88px]" />   {/* 7. Prazo */}
+              <col className="w-[78px]" />   {/* 8. Prioridade */}
+              <col className="w-[115px]" />  {/* 9. Responsáveis */}
+              <col className="w-[125px]" />  {/* 10. Ações */}
             </colgroup>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                <th className="px-3 py-2.5 font-bold">SEI</th>
-                <th className="px-3 py-2.5 font-bold">Objeto / Setor</th>
-                <th className="px-3 py-2.5 font-bold">Modalidade</th>
-                <th className="px-3 py-2.5 text-center font-bold">Emenda</th>
-                <th className="px-3 py-2.5 font-bold">Publicações</th>
-                <th className="px-3 py-2.5 font-bold">Status</th>
-                <th className="px-3 py-2.5 font-bold">Prazo</th>
-                <th className="px-3 py-2.5 font-bold">Prioridade</th>
-                <th className="px-3 py-2.5 font-bold">Responsáveis</th>
-                <th className="px-3 py-2.5 text-center font-bold">Ações</th>
+                <th className="px-2 py-2 font-bold">SEI</th>
+                <th className="px-2 py-2 font-bold">Objeto / Setor</th>
+                <th className="px-2 py-2 font-bold">Modalidade</th>
+                <th className="px-2 py-2 text-center font-bold">Emenda</th>
+                <th className="px-2 py-2 font-bold">Publicações</th>
+                <th className="px-2 py-2 font-bold">Status</th>
+                <th className="px-2 py-2 font-bold">Prazo</th>
+                <th className="px-2 py-2 font-bold">Prioridade</th>
+                <th className="px-2 py-2 font-bold">Responsáveis</th>
+                <th className="sticky right-0 z-20 border-l border-slate-200 bg-slate-50 px-2 py-2 text-center font-bold shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">
+                  Ações
+                </th>
               </tr>
             </thead>
 
@@ -624,6 +677,7 @@ export function Processos({
                             aoAjustar={ajustar}
                             aoConcluir={() => setParaConcluir(p)}
                             aoEditar={() => abrirEdicao(p)}
+                            aoAbrirChecklist={() => setProcessoChecklist(p)}
                           />
                         ))
                       )
@@ -667,6 +721,88 @@ export function Processos({
           setParaConcluir(null);
         }}
       />
+
+      {/* Gaveta Lateral de Checklist (Slide-over / Drawer) */}
+      <GavetaChecklistProcesso
+        processo={processoChecklist}
+        aberto={Boolean(processoChecklist)}
+        aoFechar={fecharChecklist}
+        aoAtualizarProgresso={atualizarProgressoChecklist}
+      />
+
+      {/* Aviso Suave de Tramitação com Itens Pendentes no Checklist */}
+      {avisoTransicao && (
+        <Modal
+          aberto={Boolean(avisoTransicao)}
+          aoFechar={() => setAvisoTransicao(null)}
+          titulo="Checklist com Etapas Pendentes"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+              <AlertTriangle className="size-5 shrink-0 text-amber-600 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-semibold text-amber-950">
+                  Atenção: ainda restam itens pendentes no checklist deste processo!
+                </p>
+                <p className="mt-1 text-amber-900 leading-relaxed">
+                  O processo{' '}
+                  <strong className="text-amber-950">
+                    {avisoTransicao.processo.sei ? `${avisoTransicao.processo.sei} — ` : ''}
+                    {avisoTransicao.processo.objeto}
+                  </strong>{' '}
+                  está sendo movimentado de{' '}
+                  <span className="font-semibold">{avisoTransicao.processo.etapa}</span> para{' '}
+                  <span className="font-semibold text-marca-700">{avisoTransicao.novaEtapa}</span>, mas ainda possui{' '}
+                  <span className="font-bold underline text-amber-950">
+                    {(avisoTransicao.processo.checklist_total ?? 0) -
+                      (avisoTransicao.processo.checklist_concluidos ?? 0)}{' '}
+                    etapa(s) pendente(s)
+                  </span>{' '}
+                  ({avisoTransicao.processo.checklist_concluidos ?? 0} de{' '}
+                  {avisoTransicao.processo.checklist_total ?? 0} concluídas).
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Deseja abrir a gaveta lateral de checklist para conferir os passos da fase atual ou prefere tramitar o processo mesmo assim?
+            </p>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-2 border-t border-slate-100">
+              <Botao
+                aparencia="neutro"
+                type="button"
+                onClick={() => setAvisoTransicao(null)}
+              >
+                Cancelar
+              </Botao>
+              <Botao
+                aparencia="neutro"
+                type="button"
+                icone={<ClipboardList className="size-4" />}
+                onClick={() => {
+                  const p = avisoTransicao.processo;
+                  setAvisoTransicao(null);
+                  setProcessoChecklist(p);
+                }}
+              >
+                Conferir Checklist
+              </Botao>
+              <Botao
+                aparencia="primario"
+                type="button"
+                onClick={async () => {
+                  const { processo, novaEtapa } = avisoTransicao;
+                  setAvisoTransicao(null);
+                  await executarAjuste(processo, { etapa: novaEtapa });
+                }}
+              >
+                Tramitar mesmo assim
+              </Botao>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -691,18 +827,20 @@ function LinhaProcesso({
   aoAjustar,
   aoConcluir,
   aoEditar,
+  aoAbrirChecklist,
 }: {
   processo: Processo;
   usuarios: Usuario[];
   aoAjustar: (p: Processo, m: Partial<Processo>) => void;
   aoConcluir: () => void;
   aoEditar: () => void;
+  aoAbrirChecklist: () => void;
 }) {
   const podeEditar = usePodeEditar();
   const dias = processo.dias_para_prazo ?? null;
   const estaAtrasado = dias !== null && dias < 0;
 
-  const celula = 'border-b border-slate-200 px-3 py-2 align-top transition-colors';
+  const celula = 'border-b border-slate-200 px-2 py-2 align-top transition-colors';
   const primeiraCelula = `${celula} ${
     estaAtrasado ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-transparent'
   }`;
@@ -711,7 +849,7 @@ function LinhaProcesso({
     : 'bg-white hover:bg-slate-50/80';
 
   return (
-    <tr className={linhaDestaque}>
+    <tr className={`group ${linhaDestaque}`}>
       {/* 1. SEI */}
       <td className={primeiraCelula}>
         {processo.sei ? (
@@ -728,7 +866,12 @@ function LinhaProcesso({
       {/* 2. Objeto e Setor */}
       <td className={celula}>
         <div className="space-y-1">
-          <p className="font-semibold leading-snug text-slate-900">{processo.objeto}</p>
+          <p
+            className="font-semibold leading-snug text-slate-900 text-[12px] line-clamp-2"
+            title={processo.objeto}
+          >
+            {processo.objeto}
+          </p>
           {processo.setor_sigla && (
             <span
               title={processo.setor_nome ?? undefined}
@@ -827,14 +970,21 @@ function LinhaProcesso({
         />
       </td>
 
-      {/* 10. Ações compactas */}
-      <td className={`${celula} text-center`}>
+      {/* 10. Ações compactas (Fixas à direita para nunca sumirem da visão do usuário) */}
+      <td
+        className={`${celula} text-center sticky right-0 z-10 transition-colors shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)] border-l border-slate-100 ${
+          estaAtrasado
+            ? 'bg-red-50/95 group-hover:bg-red-100/90'
+            : 'bg-white group-hover:bg-slate-50'
+        }`}
+      >
         <MenuAcoesProcesso
           processo={processo}
           podeEditar={podeEditar}
           aoAjustar={aoAjustar}
           aoConcluir={aoConcluir}
           aoEditar={aoEditar}
+          aoAbrirChecklist={aoAbrirChecklist}
         />
       </td>
     </tr>
@@ -1284,42 +1434,102 @@ function MenuAcoesProcesso({
   aoAjustar,
   aoConcluir,
   aoEditar,
+  aoAbrirChecklist,
 }: {
   processo: Processo;
   podeEditar: boolean;
   aoAjustar: (p: Processo, m: Partial<Processo>) => void;
   aoConcluir: () => void;
   aoEditar: () => void;
+  aoAbrirChecklist: () => void;
 }) {
   const [menuAberto, setMenuAberto] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [posicaoMenu, setPosicaoMenu] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+  const botaoRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const alternarMenu = () => {
+    if (menuAberto) {
+      setMenuAberto(false);
+      return;
+    }
+    if (!botaoRef.current) return;
+    const rect = botaoRef.current.getBoundingClientRect();
+    const espacoAbaixo = window.innerHeight - rect.bottom;
+    const alturaEstimadaMenu = 260;
+
+    // Se estiver muito perto do rodapé da tela, abre para cima
+    if (espacoAbaixo < alturaEstimadaMenu && rect.top > alturaEstimadaMenu) {
+      setPosicaoMenu({
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      });
+    } else {
+      setPosicaoMenu({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setMenuAberto(true);
+  };
 
   useEffect(() => {
     if (!menuAberto) return;
     function aoClicarFora(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const alvo = e.target as Node;
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(alvo) &&
+        botaoRef.current &&
+        !botaoRef.current.contains(alvo)
+      ) {
         setMenuAberto(false);
       }
     }
     function aoTeclar(e: KeyboardEvent) {
       if (e.key === 'Escape') setMenuAberto(false);
     }
+    function aoRolar() {
+      setMenuAberto(false);
+    }
     document.addEventListener('mousedown', aoClicarFora);
     document.addEventListener('keydown', aoTeclar);
+    window.addEventListener('scroll', aoRolar, true);
+    window.addEventListener('resize', aoRolar);
     return () => {
       document.removeEventListener('mousedown', aoClicarFora);
       document.removeEventListener('keydown', aoTeclar);
+      window.removeEventListener('scroll', aoRolar, true);
+      window.removeEventListener('resize', aoRolar);
     };
   }, [menuAberto]);
 
   const proximaEtapa = PROXIMA_ETAPA[processo.etapa as EtapaAberta];
 
   if (!podeEditar) {
-    return <span className="text-slate-300">—</span>;
+    return (
+      <button
+        type="button"
+        onClick={aoAbrirChecklist}
+        title={
+          typeof processo.checklist_total === 'number' && processo.checklist_total > 0
+            ? `Checklist: ${processo.checklist_concluidos ?? 0} de ${processo.checklist_total} concluídas`
+            : 'Ver checklist'
+        }
+        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100"
+      >
+        <ClipboardList className="size-3.5" />
+        {typeof processo.checklist_total === 'number' && processo.checklist_total > 0 && (
+          <span className="text-[11px] font-medium tabular-nums">
+            {processo.checklist_concluidos ?? 0}/{processo.checklist_total}
+          </span>
+        )}
+      </button>
+    );
   }
 
   return (
-    <div className="relative inline-flex items-center gap-1" ref={ref}>
+    <div className="relative inline-flex items-center justify-center gap-0.5">
       {/* Botão de Avanço Rápido inequívoco */}
       {proximaEtapa && (
         <button
@@ -1333,15 +1543,46 @@ function MenuAcoesProcesso({
               ? 'Encerrar este processo'
               : `Avançar para a fase: ${proximaEtapa}`
           }
-          className="rounded-lg p-1 text-slate-500 hover:bg-marca-50 hover:text-marca-700 transition-colors"
+          className="rounded-md p-1 text-slate-400 hover:bg-marca-50 hover:text-marca-700 transition-colors"
         >
           {proximaEtapa === 'Concluído' ? (
-            <Check className="size-4 text-emerald-600" />
+            <Check className="size-3.5 text-emerald-600" />
           ) : (
-            <ArrowRight className="size-4" />
+            <ArrowRight className="size-3.5" />
           )}
         </button>
       )}
+
+      {/* Botão de Checklist Sequencial com Progresso (Ideia A) */}
+      <button
+        type="button"
+        onClick={aoAbrirChecklist}
+        aria-label={`Ver checklist do processo ${processo.objeto}`}
+        title={
+          typeof processo.checklist_total === 'number' && processo.checklist_total > 0
+            ? `Checklist: ${processo.checklist_concluidos ?? 0} de ${processo.checklist_total} etapas concluídas`
+            : 'Abrir fluxo de checklist'
+        }
+        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition-colors ${
+          (processo.checklist_total ?? 0) > 0 &&
+          (processo.checklist_concluidos ?? 0) === processo.checklist_total
+            ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60'
+            : (processo.checklist_concluidos ?? 0) > 0
+            ? 'bg-marca-50 text-marca-700 hover:bg-marca-100 border border-marca-200/60'
+            : (processo.checklist_total ?? 0) > 0
+            ? 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+        }`}
+      >
+        <ClipboardList className="size-3.5 shrink-0" />
+        {typeof processo.checklist_total === 'number' && processo.checklist_total > 0 ? (
+          <span className="text-[10.5px] font-semibold tabular-nums">
+            {processo.checklist_concluidos ?? 0}/{processo.checklist_total}
+          </span>
+        ) : (
+          <span className="text-[10.5px] text-slate-500">Checklist</span>
+        )}
+      </button>
 
       {/* Botão de Edição Completa */}
       <button
@@ -1349,75 +1590,104 @@ function MenuAcoesProcesso({
         onClick={aoEditar}
         aria-label={`Editar o processo ${processo.objeto}`}
         title="Editar processo completo"
-        className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
       >
         <Pencil className="size-3.5" />
       </button>
 
       {/* Menu Contextual de 3 Pontos */}
       <button
+        ref={botaoRef}
         type="button"
-        onClick={() => setMenuAberto((a) => !a)}
+        onClick={alternarMenu}
         aria-label="Mais opções de movimentação"
         title="Mover para outra fase ou encerrar"
-        className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+        className={`rounded-md p-1 transition-colors ${
+          menuAberto
+            ? 'bg-slate-200 text-slate-800'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+        }`}
       >
         <MoreHorizontal className="size-3.5" />
       </button>
 
-      {/* Menu suspenso */}
-      {menuAberto && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-xl border border-slate-200 bg-white py-1.5 text-xs shadow-xl ring-1 ring-black/5 animate-in fade-in zoom-in-95">
-          <div className="px-3 py-1 font-bold text-slate-400 uppercase tracking-wider text-[10px]">
-            Mover para:
-          </div>
+      {/* Menu suspenso renderizado no Portal (fica acima de todas as linhas e colunas sticky) */}
+      {menuAberto &&
+        posicaoMenu &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: posicaoMenu.top !== undefined ? `${posicaoMenu.top}px` : undefined,
+              bottom: posicaoMenu.bottom !== undefined ? `${posicaoMenu.bottom}px` : undefined,
+              right: `${posicaoMenu.right}px`,
+            }}
+            className="z-50 w-52 rounded-xl border border-slate-200 bg-white py-1.5 text-xs shadow-2xl ring-1 ring-black/5 animate-in fade-in zoom-in-95"
+          >
+            <div className="px-3 py-1 font-bold text-slate-400 uppercase tracking-wider text-[10px]">
+              Mover para:
+            </div>
 
-          {ETAPAS.filter((e) => e.chave !== processo.etapa).map((e) => (
+            {ETAPAS.filter((e) => e.chave !== processo.etapa).map((e) => (
+              <button
+                key={e.chave}
+                type="button"
+                onClick={() => {
+                  setMenuAberto(false);
+                  aoAjustar(processo, { etapa: e.chave });
+                }}
+                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+              >
+                <span>{e.titulo}</span>
+                {e.chave === proximaEtapa && (
+                  <span className="text-[10px] font-semibold text-marca-600">Sugerida</span>
+                )}
+              </button>
+            ))}
+
+            <div className="my-1 border-t border-slate-100" />
+
             <button
-              key={e.chave}
               type="button"
               onClick={() => {
                 setMenuAberto(false);
-                aoAjustar(processo, { etapa: e.chave });
+                aoAbrirChecklist();
               }}
-              className="flex w-full items-center justify-between px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
             >
-              <span>{e.titulo}</span>
-              {e.chave === proximaEtapa && (
-                <span className="text-[10px] font-semibold text-marca-600">Sugerida</span>
-              )}
+              <ClipboardList className="size-3.5 text-slate-400" />
+              <span>Abrir checklist…</span>
             </button>
-          ))}
 
-          <div className="my-1 border-t border-slate-100" />
+            <button
+              type="button"
+              onClick={() => {
+                setMenuAberto(false);
+                aoConcluir();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-semibold text-emerald-700 hover:bg-emerald-50"
+            >
+              <Check className="size-3.5 text-emerald-600" />
+              <span>Encerrar processo…</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMenuAberto(false);
-              aoConcluir();
-            }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-semibold text-emerald-700 hover:bg-emerald-50"
-          >
-            <Check className="size-3.5 text-emerald-600" />
-            <span>Encerrar processo…</span>
-          </button>
+            <div className="my-1 border-t border-slate-100" />
 
-          <div className="my-1 border-t border-slate-100" />
-
-          <button
-            type="button"
-            onClick={() => {
-              setMenuAberto(false);
-              aoEditar();
-            }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-600 hover:bg-slate-50"
-          >
-            <Pencil className="size-3.5 text-slate-400" />
-            <span>Editar completo</span>
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              onClick={() => {
+                setMenuAberto(false);
+                aoEditar();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-600 hover:bg-slate-50"
+            >
+              <Pencil className="size-3.5 text-slate-400" />
+              <span>Editar completo</span>
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

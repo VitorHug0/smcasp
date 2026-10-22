@@ -23,6 +23,7 @@ import {
   Clock,
   FileSpreadsheet,
   FileUp,
+  GripVertical,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -36,7 +37,7 @@ import { useDados } from '../hooks/useDados';
 import { usePodeEditar } from '../lib/permissoes';
 import { exportarParaExcel } from '../lib/exportarProcessos';
 import { opcoesDeSetor } from '../lib/setores';
-import { dataBR, hojeISO } from '../lib/formato';
+import { dataBR } from '../lib/formato';
 import { Avatar } from '../components/Avatar';
 import { BotaoCopiar } from '../components/BotaoCopiar';
 import { Botao } from '../components/ui/Botao';
@@ -66,7 +67,43 @@ export const ETAPAS: Array<{ chave: EtapaAberta; titulo: string; faixa: string }
   { chave: 'Outros', titulo: 'Outros', faixa: 'Outros' },
 ];
 
-const COLUNAS_DA_TABELA = 10;
+const COLUNAS_DA_TABELA = 11;
+
+/** Chave de armazenamento local da ordem personalizada dos processos */
+const CHAVE_ORDEM = 'smcasp_processos_ordem_v1';
+
+function salvarOrdemLocal(itens: Processo[]) {
+  try {
+    const ids = itens.map((p) => p.id);
+    localStorage.setItem(CHAVE_ORDEM, JSON.stringify(ids));
+  } catch {
+    // ignora indisponibilidade do localStorage
+  }
+}
+
+function aplicarOrdemSalva(itens: Processo[]): Processo[] {
+  try {
+    const bruto = localStorage.getItem(CHAVE_ORDEM);
+    if (!bruto) return itens;
+    const ids: number[] = JSON.parse(bruto);
+    const mapa = new Map<number, number>();
+    ids.forEach((id, idx) => mapa.set(id, idx));
+
+    return [...itens].sort((a, b) => {
+      const ia = mapa.has(a.id) ? mapa.get(a.id)! : 999999;
+      const ib = mapa.has(b.id) ? mapa.get(b.id)! : 999999;
+      return ia - ib;
+    });
+  } catch {
+    return itens;
+  }
+}
+
+interface AlvoArrasto {
+  idDestino: number | null;
+  posicao: 'acima' | 'abaixo' | 'fase';
+  etapaDestino: EtapaAberta;
+}
 
 /** Cor do texto e fundo da prioridade. */
 const COR_PRIORIDADE: Record<Prioridade, string> = {
@@ -127,8 +164,14 @@ export function Processos({
   const [exportando, setExportando] = useState(false);
   const [exportado, setExportado] = useState<number | null>(null);
 
+  // Controle de arrasto entre linhas / fases (Drag and drop)
+  const [idArrastando, setIdArrastando] = useState<number | null>(null);
+  const [alvoArrasto, setAlvoArrasto] = useState<AlvoArrasto | null>(null);
+  const arrastandoIdRef = useRef<number | null>(null);
+  const alvoArrastoRef = useRef<AlvoArrasto | null>(null);
+
   useEffect(() => {
-    if (dados) setLista(dados);
+    if (dados) setLista(aplicarOrdemSalva(dados));
   }, [dados]);
   const processos = lista ?? dados ?? [];
 
@@ -244,6 +287,172 @@ export function Processos({
     await executarAjuste(processo, mudanca);
   }
 
+  const lidarComInicioArrasto = (e: React.DragEvent, processo: Processo) => {
+    if (!podeEditar) return;
+    const target = e.target as HTMLElement;
+    if (
+      ['INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(target.tagName) ||
+      target.closest('button[data-sem-arrasto="true"]')
+    ) {
+      return;
+    }
+
+    arrastandoIdRef.current = processo.id;
+    alvoArrastoRef.current = null;
+    setIdArrastando(processo.id);
+    setAlvoArrasto(null);
+
+    e.dataTransfer.setData('text/plain', String(processo.id));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const lidarComFimArrasto = () => {
+    arrastandoIdRef.current = null;
+    alvoArrastoRef.current = null;
+    setIdArrastando(null);
+    setAlvoArrasto(null);
+  };
+
+  const lidarComSobreLinha = (e: React.DragEvent, processo: Processo, etapa: EtapaAberta) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const idAtual = arrastandoIdRef.current ?? idArrastando;
+    if (!idAtual || idAtual === processo.id) {
+      return;
+    }
+
+    const retangulo = e.currentTarget.getBoundingClientRect();
+    const meio = retangulo.top + retangulo.height / 2;
+    const posicao = e.clientY < meio ? 'acima' : 'abaixo';
+
+    if (
+      alvoArrastoRef.current?.idDestino !== processo.id ||
+      alvoArrastoRef.current?.posicao !== posicao ||
+      alvoArrastoRef.current?.etapaDestino !== etapa
+    ) {
+      const novoAlvo: AlvoArrasto = { idDestino: processo.id, posicao, etapaDestino: etapa };
+      alvoArrastoRef.current = novoAlvo;
+      setAlvoArrasto(novoAlvo);
+    }
+  };
+
+  const lidarComSobreFase = (e: React.DragEvent, etapa: EtapaAberta) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const idAtual = arrastandoIdRef.current ?? idArrastando;
+    if (!idAtual) return;
+
+    if (
+      alvoArrastoRef.current?.idDestino !== null ||
+      alvoArrastoRef.current?.etapaDestino !== etapa
+    ) {
+      const novoAlvo: AlvoArrasto = { idDestino: null, posicao: 'fase', etapaDestino: etapa };
+      alvoArrastoRef.current = novoAlvo;
+      setAlvoArrasto(novoAlvo);
+    }
+  };
+
+  const lidarComSoltar = async (e: React.DragEvent, etapaFallback?: EtapaAberta) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    let idArrastado = arrastandoIdRef.current ?? idArrastando;
+    if (!idArrastado) {
+      const doDataTransfer = e.dataTransfer.getData('text/plain');
+      if (doDataTransfer) idArrastado = Number(doDataTransfer);
+    }
+
+    const alvo = alvoArrastoRef.current ?? alvoArrasto;
+    lidarComFimArrasto();
+
+    if (!idArrastado) return;
+
+    const processoArrastado = processos.find((p) => p.id === idArrastado);
+    if (!processoArrastado) return;
+
+    const etapaDestino = alvo?.etapaDestino ?? etapaFallback ?? (processoArrastado.etapa as EtapaAberta);
+    const idDestino = alvo?.idDestino ?? null;
+    const posicao = alvo?.posicao ?? 'fase';
+
+    // Se soltou sobre si mesmo na mesma etapa, não faz nada
+    if (idDestino === processoArrastado.id && processoArrastado.etapa === etapaDestino) {
+      return;
+    }
+
+    const mudouEtapa = processoArrastado.etapa !== etapaDestino;
+
+    // Se mudou de etapa, verificar pendências de checklist
+    if (mudouEtapa) {
+      const total = processoArrastado.checklist_total ?? 0;
+      const concluidos = processoArrastado.checklist_concluidos ?? 0;
+      if (total > 0 && concluidos < total) {
+        setAvisoTransicao({
+          processo: processoArrastado,
+          novaEtapa: etapaDestino,
+        });
+        return;
+      }
+    }
+
+    // Calcula a nova lista ordenada
+    const listaBase = lista ?? processos;
+    const semArrastado = listaBase.filter((p) => p.id !== processoArrastado.id);
+    const atualizado: Processo = mudouEtapa
+      ? { ...processoArrastado, etapa: etapaDestino }
+      : processoArrastado;
+
+    let novaLista: Processo[];
+
+    if (idDestino === null) {
+      // Soltou na fase vazia ou no cabeçalho da fase
+      const indiceFase = semArrastado.findIndex((p) => p.etapa === etapaDestino);
+      if (indiceFase === -1) {
+        const ordemEtapas = ETAPAS.map((et) => et.chave);
+        const posEtapa = ordemEtapas.indexOf(etapaDestino);
+        let indiceInsercao = semArrastado.length;
+        for (let i = posEtapa + 1; i < ordemEtapas.length; i++) {
+          const prox = semArrastado.findIndex((p) => p.etapa === ordemEtapas[i]);
+          if (prox !== -1) {
+            indiceInsercao = prox;
+            break;
+          }
+        }
+        novaLista = [
+          ...semArrastado.slice(0, indiceInsercao),
+          atualizado,
+          ...semArrastado.slice(indiceInsercao),
+        ];
+      } else {
+        novaLista = [
+          ...semArrastado.slice(0, indiceFase),
+          atualizado,
+          ...semArrastado.slice(indiceFase),
+        ];
+      }
+    } else {
+      const indiceDestino = semArrastado.findIndex((p) => p.id === idDestino);
+      if (indiceDestino === -1) {
+        novaLista = [...semArrastado, atualizado];
+      } else {
+        const indiceInsercao = posicao === 'acima' ? indiceDestino : indiceDestino + 1;
+        novaLista = [
+          ...semArrastado.slice(0, indiceInsercao),
+          atualizado,
+          ...semArrastado.slice(indiceInsercao),
+        ];
+      }
+    }
+
+    setLista(novaLista);
+    salvarOrdemLocal(novaLista);
+
+    if (mudouEtapa) {
+      await executarAjuste(processoArrastado, { etapa: etapaDestino });
+    }
+  };
+
   const atualizarProgressoChecklist = useCallback(
     (idProcesso: number, concluidos: number, total: number) => {
       setLista((atual) => {
@@ -308,7 +517,7 @@ export function Processos({
 
   const filtrando = Boolean(busca || responsavelFiltro || prioridadeFiltro || somenteMinhasDemandas);
   const classeFiltro =
-    'cursor-pointer rounded-lg border border-slate-300 px-3 py-2.5 text-base ' +
+    'cursor-pointer rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white ' +
     'focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100';
 
   return (
@@ -324,7 +533,7 @@ export function Processos({
               onChange={(e) => setBusca(e.target.value)}
               placeholder="Procurar por SEI, objeto, status, AUDESP ou PNCP…"
               aria-label="Procurar processos"
-              className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-3 text-sm focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
+              className="w-full rounded-lg border border-slate-300 py-2 pl-10 pr-3 text-sm focus:border-marca-500 focus:outline-none focus:ring-4 focus:ring-marca-100"
             />
           </div>
           <select
@@ -392,7 +601,7 @@ export function Processos({
             <button
               type="button"
               onClick={() => setFiltroRapido('todos')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all text-[12.5px] ${
                 filtroRapido === 'todos'
                   ? 'bg-slate-900 text-white shadow-xs'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80'
@@ -400,7 +609,7 @@ export function Processos({
             >
               <span>Todos</span>
               <span
-                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                className={`rounded-full px-1.5 py-0.2 text-[11px] font-bold ${
                   filtroRapido === 'todos' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-700'
                 }`}
               >
@@ -411,7 +620,7 @@ export function Processos({
             <button
               type="button"
               onClick={() => setFiltroRapido(filtroRapido === 'atrasados' ? 'todos' : 'atrasados')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all text-[12.5px] ${
                 filtroRapido === 'atrasados'
                   ? 'bg-red-600 text-white shadow-xs ring-2 ring-red-300'
                   : contadores.atrasados > 0
@@ -422,7 +631,7 @@ export function Processos({
               <AlertTriangle className="size-3.5" />
               <span>Atrasados</span>
               <span
-                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                className={`rounded-full px-1.5 py-0.2 text-[11px] font-bold ${
                   filtroRapido === 'atrasados'
                     ? 'bg-red-700 text-white'
                     : contadores.atrasados > 0
@@ -437,7 +646,7 @@ export function Processos({
             <button
               type="button"
               onClick={() => setFiltroRapido(filtroRapido === 'emenda' ? 'todos' : 'emenda')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all text-[12.5px] ${
                 filtroRapido === 'emenda'
                   ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-300'
                   : 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100'
@@ -445,7 +654,7 @@ export function Processos({
             >
               <span>Com Emenda</span>
               <span
-                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                className={`rounded-full px-1.5 py-0.2 text-[11px] font-bold ${
                   filtroRapido === 'emenda' ? 'bg-emerald-700 text-white' : 'bg-emerald-200 text-emerald-900'
                 }`}
               >
@@ -456,7 +665,7 @@ export function Processos({
             <button
               type="button"
               onClick={() => setFiltroRapido(filtroRapido === 'prioridade_alta' ? 'todos' : 'prioridade_alta')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition-all text-[12.5px] ${
                 filtroRapido === 'prioridade_alta'
                   ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-300'
                   : 'bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-200 hover:bg-amber-100'
@@ -464,7 +673,7 @@ export function Processos({
             >
               <span>Prioridade Alta</span>
               <span
-                className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                className={`rounded-full px-1.5 py-0.2 text-[11px] font-bold ${
                   filtroRapido === 'prioridade_alta' ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-900'
                 }`}
               >
@@ -514,13 +723,13 @@ export function Processos({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-600">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[13px] text-slate-600">
         <p>
           <strong className="text-slate-900">{filtrados.length}</strong>{' '}
           {filtrados.length === 1 ? 'processo em andamento' : 'processos em andamento'}
           {filtrando && ' (com filtros aplicados)'} ·{' '}
           {podeEditar
-            ? 'clique em qualquer célula para editar; o número do SEI se copia com um clique.'
+            ? 'clique em qualquer célula para editar; arraste as linhas para reordenar ou mover de fase; o número do SEI se copia com um clique.'
             : 'seu acesso é somente para consulta; o número do SEI se copia com um clique.'}
         </p>
       </div>
@@ -590,31 +799,37 @@ export function Processos({
       {/* ----------------------------------------------------------- planilha */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
         <div className="rolagem-suave overflow-x-auto">
-          <table className="w-full table-fixed border-collapse text-left text-[12px]">
+          <table className="w-full table-fixed border-collapse text-left text-[13px]">
             <colgroup>
-              <col className="w-[125px]" />  {/* 1. SEI */}
-              <col className="w-[20%] min-w-[170px]" /> {/* 2. Objeto e Setor */}
-              <col className="w-[85px]" />   {/* 3. Modalidade */}
-              <col className="w-[50px]" />   {/* 4. Emenda */}
-              <col className="w-[105px]" />  {/* 5. Publicações */}
-              <col className="w-[18%] min-w-[130px]" /> {/* 6. Status */}
-              <col className="w-[88px]" />   {/* 7. Prazo */}
-              <col className="w-[78px]" />   {/* 8. Prioridade */}
-              <col className="w-[115px]" />  {/* 9. Responsáveis */}
-              <col className="w-[125px]" />  {/* 10. Ações */}
+              {podeEditar && <col className="w-[38px]" />}  {/* 0. Arrasto */}
+              <col className="w-[135px]" />  {/* 1. SEI */}
+              <col className="w-[22%] min-w-[190px]" /> {/* 2. Objeto e Setor */}
+              <col className="w-[95px]" />   {/* 3. Modalidade */}
+              <col className="w-[64px]" />   {/* 4. Emenda */}
+              <col className="w-[115px]" />  {/* 5. Publicações */}
+              <col className="w-[18%] min-w-[150px]" /> {/* 6. Status */}
+              <col className="w-[100px]" />  {/* 7. Prazo */}
+              <col className="w-[90px]" />   {/* 8. Prioridade */}
+              <col className="w-[125px]" />  {/* 9. Responsáveis */}
+              <col className="w-[130px]" />  {/* 10. Ações */}
             </colgroup>
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                <th className="px-2 py-2 font-bold">SEI</th>
-                <th className="px-2 py-2 font-bold">Objeto / Setor</th>
-                <th className="px-2 py-2 font-bold">Modalidade</th>
-                <th className="px-2 py-2 text-center font-bold">Emenda</th>
-                <th className="px-2 py-2 font-bold">Publicações</th>
-                <th className="px-2 py-2 font-bold">Status</th>
-                <th className="px-2 py-2 font-bold">Prazo</th>
-                <th className="px-2 py-2 font-bold">Prioridade</th>
-                <th className="px-2 py-2 font-bold">Responsáveis</th>
-                <th className="sticky right-0 z-20 border-l border-slate-200 bg-slate-50 px-2 py-2 text-center font-bold shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">
+              <tr className="border-b border-slate-200 bg-slate-50 text-[12px] font-bold uppercase tracking-wider text-slate-600">
+                {podeEditar && (
+                  <th className="w-[38px] px-1 py-2.5 text-center" title="Mover processos arrastando">
+                    <span className="sr-only">Arrastar</span>
+                  </th>
+                )}
+                <th className="px-2.5 py-2.5 font-bold">SEI</th>
+                <th className="px-2.5 py-2.5 font-bold">Objeto / Setor</th>
+                <th className="px-2.5 py-2.5 font-bold">Modalidade</th>
+                <th className="px-2.5 py-2.5 text-center font-bold">Emenda</th>
+                <th className="px-2.5 py-2.5 font-bold">Publicações</th>
+                <th className="px-2.5 py-2.5 font-bold">Status</th>
+                <th className="px-2.5 py-2.5 font-bold">Prazo</th>
+                <th className="px-2.5 py-2.5 font-bold">Prioridade</th>
+                <th className="px-2.5 py-2.5 font-bold">Responsáveis</th>
+                <th className="sticky right-0 z-20 border-l border-slate-200 bg-slate-50 px-2.5 py-2.5 text-center font-bold shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.06)]">
                   Ações
                 </th>
               </tr>
@@ -624,16 +839,24 @@ export function Processos({
               {ETAPAS.map((etapa) => {
                 const itens = porEtapa.get(etapa.chave) ?? [];
                 const estaRecolhido = etapasRecolhidas.has(etapa.chave);
+                const ehAlvoFase =
+                  alvoArrasto?.etapaDestino === etapa.chave && alvoArrasto.idDestino === null;
 
                 return (
                   <Fragment key={etapa.chave}>
                     {/* Cabeçalho da fase discreto em slate suave com Accordion */}
                     <tr className="border-t border-slate-200">
                       <th
-                        colSpan={COLUNAS_DA_TABELA}
+                        colSpan={podeEditar ? COLUNAS_DA_TABELA : COLUNAS_DA_TABELA - 1}
                         scope="colgroup"
                         onClick={() => alternarEtapa(etapa.chave)}
-                        className="group cursor-pointer select-none border-y border-slate-200 bg-slate-100/80 px-3 py-2 text-left transition-colors hover:bg-slate-200/70"
+                        onDragOver={(e) => lidarComSobreFase(e, etapa.chave)}
+                        onDrop={(e) => lidarComSoltar(e, etapa.chave)}
+                        className={`group cursor-pointer select-none border-y px-3 py-2.5 text-left transition-colors ${
+                          ehAlvoFase
+                            ? 'border-marca-300 bg-marca-50 ring-2 ring-inset ring-marca-400'
+                            : 'border-slate-200 bg-slate-100/90 hover:bg-slate-200/80'
+                        }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
@@ -644,14 +867,19 @@ export function Processos({
                                 <ChevronDown className="size-4" />
                               )}
                             </span>
-                            <span className="text-[12px] font-bold uppercase tracking-wider text-slate-800">
+                            <span className="text-[13px] font-bold uppercase tracking-wider text-slate-800">
                               {etapa.faixa}
                             </span>
-                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-2xs">
+                            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11.5px] font-bold text-slate-600 shadow-2xs">
                               {itens.length} {itens.length === 1 ? 'processo' : 'processos'}
                             </span>
+                            {ehAlvoFase && (
+                              <span className="rounded-md bg-marca-600 px-2 py-0.5 text-xs font-bold text-white animate-pulse">
+                                Soltar aqui para mover para esta fase
+                              </span>
+                            )}
                           </div>
-                          <span className="text-[11px] font-medium text-slate-400 group-hover:text-slate-600">
+                          <span className="text-[11.5px] font-medium text-slate-400 group-hover:text-slate-600">
                             {estaRecolhido ? 'Clique para expandir' : 'Clique para recolher'}
                           </span>
                         </div>
@@ -662,24 +890,49 @@ export function Processos({
                       itens.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={COLUNAS_DA_TABELA}
-                            className="border-b border-slate-200 px-3 py-3 text-center text-xs text-slate-400"
+                            colSpan={podeEditar ? COLUNAS_DA_TABELA : COLUNAS_DA_TABELA - 1}
+                            onDragOver={(e) => lidarComSobreFase(e, etapa.chave)}
+                            onDrop={(e) => lidarComSoltar(e, etapa.chave)}
+                            className={`border-b border-slate-200 px-3 py-4 text-center text-[13px] transition-colors ${
+                              ehAlvoFase
+                                ? 'bg-marca-50 border-marca-300 font-semibold text-marca-700'
+                                : 'text-slate-400'
+                            }`}
                           >
-                            {filtrando ? 'Nenhum processo encontrado nesta fase com os filtros aplicados' : 'Nenhum processo nesta fase'}
+                            {ehAlvoFase
+                              ? 'Solte o processo aqui para movê-lo para esta fase'
+                              : filtrando
+                                ? 'Nenhum processo encontrado nesta fase com os filtros aplicados'
+                                : 'Nenhum processo nesta fase — arraste um processo para cá para movê-lo'}
                           </td>
                         </tr>
                       ) : (
-                        itens.map((p) => (
-                          <LinhaProcesso
-                            key={p.id}
-                            processo={p}
-                            usuarios={usuarios}
-                            aoAjustar={ajustar}
-                            aoConcluir={() => setParaConcluir(p)}
-                            aoEditar={() => abrirEdicao(p)}
-                            aoAbrirChecklist={() => setProcessoChecklist(p)}
-                          />
-                        ))
+                        itens.map((p) => {
+                          const ehArrastado = idArrastando === p.id;
+                          const indicador =
+                            alvoArrasto?.idDestino === p.id ? alvoArrasto.posicao : null;
+
+                          return (
+                            <LinhaProcesso
+                              key={p.id}
+                              processo={p}
+                              etapaChave={etapa.chave}
+                              usuarios={usuarios}
+                              aoAjustar={ajustar}
+                              aoConcluir={() => setParaConcluir(p)}
+                              aoEditar={() => abrirEdicao(p)}
+                              aoAbrirChecklist={() => setProcessoChecklist(p)}
+                              arrastando={ehArrastado}
+                              indicadorArrasto={
+                                indicador === 'acima' || indicador === 'abaixo' ? indicador : null
+                              }
+                              aoIniciarArrasto={lidarComInicioArrasto}
+                              aoSobreLinha={lidarComSobreLinha}
+                              aoSoltarLinha={(e) => lidarComSoltar(e, etapa.chave)}
+                              aoFimArrasto={lidarComFimArrasto}
+                            />
+                          );
+                        })
                       )
                     )}
                   </Fragment>
@@ -697,15 +950,23 @@ export function Processos({
         usuarios={usuarios}
         aoFechar={fecharModal}
         aoSalvar={(salvo) => {
-          setLista(
-            emEdicao
-              ? processos.map((p) => (p.id === salvo.id ? salvo : p))
-              : [salvo, ...processos],
-          );
+          setLista((atual) => {
+            const base = atual ?? processos;
+            const nova = emEdicao
+              ? base.map((p) => (p.id === salvo.id ? salvo : p))
+              : [salvo, ...base];
+            salvarOrdemLocal(nova);
+            return nova;
+          });
           fecharModal();
         }}
         aoExcluir={(removido) => {
-          setLista(processos.filter((p) => p.id !== removido.id));
+          setLista((atual) => {
+            const base = atual ?? processos;
+            const nova = base.filter((p) => p.id !== removido.id);
+            salvarOrdemLocal(nova);
+            return nova;
+          });
           fecharModal();
           setApagado(removido.objeto);
         }}
@@ -823,24 +1084,38 @@ const PROXIMA_ETAPA: Record<EtapaAberta, Etapa> = {
 
 function LinhaProcesso({
   processo,
+  etapaChave,
   usuarios,
   aoAjustar,
   aoConcluir,
   aoEditar,
   aoAbrirChecklist,
+  arrastando,
+  indicadorArrasto,
+  aoIniciarArrasto,
+  aoSobreLinha,
+  aoSoltarLinha,
+  aoFimArrasto,
 }: {
   processo: Processo;
+  etapaChave: EtapaAberta;
   usuarios: Usuario[];
   aoAjustar: (p: Processo, m: Partial<Processo>) => void;
   aoConcluir: () => void;
   aoEditar: () => void;
   aoAbrirChecklist: () => void;
+  arrastando?: boolean;
+  indicadorArrasto?: 'acima' | 'abaixo' | null;
+  aoIniciarArrasto?: (e: React.DragEvent, p: Processo) => void;
+  aoSobreLinha?: (e: React.DragEvent, p: Processo, etapa: EtapaAberta) => void;
+  aoSoltarLinha?: (e: React.DragEvent) => void;
+  aoFimArrasto?: () => void;
 }) {
   const podeEditar = usePodeEditar();
   const dias = processo.dias_para_prazo ?? null;
   const estaAtrasado = dias !== null && dias < 0;
 
-  const celula = 'border-b border-slate-200 px-2 py-2 align-top transition-colors';
+  const celula = 'border-b border-slate-200 px-2.5 py-2.5 align-top transition-colors';
   const primeiraCelula = `${celula} ${
     estaAtrasado ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-transparent'
   }`;
@@ -848,15 +1123,49 @@ function LinhaProcesso({
     ? 'bg-red-50/20 hover:bg-red-50/40'
     : 'bg-white hover:bg-slate-50/80';
 
+  const classeArrasto = arrastando
+    ? 'opacity-35 bg-slate-100 scale-[0.99]'
+    : indicadorArrasto === 'acima'
+      ? 'border-t-2 border-t-marca-500 bg-marca-50/20'
+      : indicadorArrasto === 'abaixo'
+        ? 'border-b-2 border-b-marca-500 bg-marca-50/20'
+        : '';
+
   return (
-    <tr className={`group ${linhaDestaque}`}>
+    <tr
+      draggable={podeEditar}
+      onDragStart={(e) => aoIniciarArrasto?.(e, processo)}
+      onDragOver={(e) => aoSobreLinha?.(e, processo, etapaChave)}
+      onDrop={aoSoltarLinha}
+      onDragEnd={aoFimArrasto}
+      className={`group transition-all ${linhaDestaque} ${classeArrasto}`}
+    >
+      {/* 0. Alça de Arrasto */}
+      {podeEditar && (
+        <td className={`${celula} w-[38px] px-1 text-center select-none`}>
+          <button
+            type="button"
+            draggable
+            onDragStart={(e) => {
+              e.stopPropagation();
+              aoIniciarArrasto?.(e, processo);
+            }}
+            className="inline-flex size-7 items-center justify-center rounded text-slate-400 hover:text-marca-600 hover:bg-marca-50 cursor-grab active:cursor-grabbing transition-colors focus:outline-none focus:ring-2 focus:ring-marca-500"
+            title="Clique e arraste para reordenar linhas ou mover entre fases"
+            aria-label={`Mover processo ${processo.objeto}`}
+          >
+            <GripVertical className="size-4 pointer-events-none" />
+          </button>
+        </td>
+      )}
+
       {/* 1. SEI */}
       <td className={primeiraCelula}>
         {processo.sei ? (
           <BotaoCopiar
             texto={processo.sei}
             rotulo="Copiar número do processo"
-            className="w-full font-mono text-[11.5px] font-medium text-slate-800"
+            className="w-full font-mono text-[13px] font-medium text-slate-800"
           />
         ) : (
           <span className="px-1 text-slate-300">—</span>
@@ -867,7 +1176,7 @@ function LinhaProcesso({
       <td className={celula}>
         <div className="space-y-1">
           <p
-            className="font-semibold leading-snug text-slate-900 text-[12px] line-clamp-2"
+            className="font-semibold leading-snug text-slate-900 text-[13.5px] line-clamp-2"
             title={processo.objeto}
           >
             {processo.objeto}
@@ -875,7 +1184,7 @@ function LinhaProcesso({
           {processo.setor_sigla && (
             <span
               title={processo.setor_nome ?? undefined}
-              className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-slate-700 ring-1 ring-inset ring-slate-200"
+              className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-slate-700 ring-1 ring-inset ring-slate-200"
             >
               {processo.setor_sigla}
             </span>
@@ -890,7 +1199,7 @@ function LinhaProcesso({
           valor={processo.modalidade ?? ''}
           opcoes={MODALIDADES.map((m) => ({ valor: m, texto: m }))}
           aoMudar={(v) => aoAjustar(processo, { modalidade: (v || null) as Modalidade | null })}
-          className="text-[11.5px] font-medium text-slate-700"
+          className="text-[12.5px] font-medium text-slate-700"
         />
       </td>
 
@@ -904,7 +1213,7 @@ function LinhaProcesso({
             className="inline-flex items-center justify-center rounded transition-transform hover:scale-105"
           >
             {processo.emenda === 1 ? (
-              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                 Emenda
               </span>
             ) : (
@@ -912,7 +1221,7 @@ function LinhaProcesso({
             )}
           </button>
         ) : processo.emenda === 1 ? (
-          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
             Emenda
           </span>
         ) : (
@@ -934,7 +1243,7 @@ function LinhaProcesso({
         <TextoEditavel
           valor={processo.status}
           aoSalvar={(v) => aoAjustar(processo, { status: v })}
-          className="text-[12px] text-slate-800"
+          className="text-[13px] text-slate-800"
         />
       </td>
 
@@ -956,7 +1265,7 @@ function LinhaProcesso({
           semVazio
           opcoes={PRIORIDADES.map((p) => ({ valor: p, texto: p }))}
           aoMudar={(v) => aoAjustar(processo, { prioridade: (v || 'Baixa') as Prioridade })}
-          className={`rounded-full px-2 py-0.5 text-[10.5px] uppercase ring-1 ring-inset ${COR_PRIORIDADE[processo.prioridade]}`}
+          className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ring-1 ring-inset ${COR_PRIORIDADE[processo.prioridade]}`}
         />
       </td>
 
@@ -1056,7 +1365,7 @@ function CelulaResponsaveis({
             {u1 && (
               <div className="flex items-center gap-1.5" title={`Responsável: ${u1.nome}`}>
                 <Avatar nome={u1.nome} tamanho="pequeno" />
-                <span className="max-w-[110px] truncate text-[11px] font-medium text-slate-800">
+                <span className="max-w-[110px] truncate text-[12px] font-medium text-slate-800">
                   {u1.nome}
                 </span>
               </div>
@@ -1064,7 +1373,7 @@ function CelulaResponsaveis({
             {u2 && (
               <div className="flex items-center gap-1.5" title={`2º Responsável: ${u2.nome}`}>
                 <Avatar nome={u2.nome} tamanho="pequeno" />
-                <span className="max-w-[110px] truncate text-[10.5px] text-slate-500">
+                <span className="max-w-[110px] truncate text-[11.5px] text-slate-500">
                   {u2.nome}
                 </span>
               </div>
@@ -1213,13 +1522,13 @@ function CelulaPublicacoes({
         ) : (
           <>
             {processo.audesp && (
-              <span className="inline-flex max-w-full items-center gap-1 truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+              <span className="inline-flex max-w-full items-center gap-1 truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
                 <span className="font-bold text-slate-500">AUDESP:</span>
                 <span className="truncate">{processo.audesp}</span>
               </span>
             )}
             {processo.pncp && (
-              <span className="inline-flex max-w-full items-center gap-1 truncate rounded bg-sky-50 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-sky-800 ring-1 ring-inset ring-sky-200">
+              <span className="inline-flex max-w-full items-center gap-1 truncate rounded bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-800 ring-1 ring-inset ring-sky-200">
                 <span className="font-bold text-sky-600">PNCP:</span>
                 <span className="truncate">{processo.pncp}</span>
               </span>
@@ -1350,27 +1659,27 @@ function CelulaPrazo({
       >
         {processo.data_limite ? (
           <>
-            <span className="font-semibold text-slate-800 text-[11.5px]">
+            <span className="font-semibold text-slate-800 text-[13px]">
               {dataBR(processo.data_limite)}
             </span>
             {dias !== null && (
               <span>
                 {dias < 0 ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-300">
+                  <span className="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-700 ring-1 ring-inset ring-red-300">
                     <AlertTriangle className="size-3" />
                     Atrasado há {Math.abs(dias)}d
                   </span>
                 ) : dias === 0 ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
                     <Clock className="size-3" />
                     Vence hoje
                   </span>
                 ) : dias <= 7 ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
                     Vence em {dias}d
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+                  <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
                     Faltam {dias}d
                   </span>
                 )}
@@ -1576,11 +1885,11 @@ function MenuAcoesProcesso({
       >
         <ClipboardList className="size-3.5 shrink-0" />
         {typeof processo.checklist_total === 'number' && processo.checklist_total > 0 ? (
-          <span className="text-[10.5px] font-semibold tabular-nums">
+          <span className="text-[11px] font-semibold tabular-nums">
             {processo.checklist_concluidos ?? 0}/{processo.checklist_total}
           </span>
         ) : (
-          <span className="text-[10.5px] text-slate-500">Checklist</span>
+          <span className="text-[11px] text-slate-500">Checklist</span>
         )}
       </button>
 
@@ -1869,7 +2178,7 @@ export function ModalProcesso({
     status: '',
     prioridade: 'Média',
     id_setor: '',
-    data_limite: hojeISO(),
+    data_limite: '',
     etapa: ETAPAS_DO_QUADRO[0] as string,
     id_responsavel: '',
     id_responsavel_2: '',
